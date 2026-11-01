@@ -2,7 +2,7 @@
 
 **Live demo: https://dhaneswaramandrasa.github.io/mobility-justice-resilience/**
 
-[![Demo: a 3D map of a Jakarta river corridor. Hexagons show where older people live, the river floods the streets along it, then red walls rise on the flooded links older people rely on most, the ranking switches to the busiest links (amber, different streets), one link is cut to show who loses access, and three cheap fixes are switched on](docs/demo-3d.gif)](https://dhaneswaramandrasa.github.io/mobility-justice-resilience/)
+[![Demo: a 3D map of a Jakarta river corridor. Hexagons show where older people live, the river floods the streets along it, then the flooded links older people rely on most glow red, the ranking switches to the busiest links (amber, different streets), one link is cut to show who loses access, and three cheap fixes are switched on](docs/demo-3d.gif)](https://dhaneswaramandrasa.github.io/mobility-justice-resilience/)
 
 A proof of concept for **vulnerability-weighted network criticality**: when a flood cuts the street network, which links matter most, and for whom? Most resilience studies rank links by how much traffic they carry. This method ranks them by how much access older people and children lose when each link goes under water, and then screens cheap fixes by how much of that access they bring back.
 

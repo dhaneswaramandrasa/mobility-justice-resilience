@@ -177,8 +177,8 @@ function layers() {
         return v > 0.5 ? ramp(Math.min(1, v / Math.max(base, 1)), true, 150) : [40, 42, 60, 60];
       }
       if (S.cellView === 'arche' && st === 0) return AR[c[6]].concat(150);
-      if (showFlood && c[5]) return [50, 110, 190, 110];
-      return ramp(Math.min(1, cellPop(c) / pmax), false, st === 0 ? 170 : 90);
+      if (showFlood && c[5]) return showCrit ? [40, 70, 120, 70] : [50, 110, 190, 110];
+      return ramp(Math.min(1, cellPop(c) / pmax), false, st === 0 ? 170 : showCrit ? 55 : 90);
     },
     updateTriggers: { getFillColor: [S.cohort, st, sel && sel.id, S.fixes, S.cellView] }
   }));
@@ -186,26 +186,22 @@ function layers() {
   out.push(new deck.PathLayer({ id: 'river', data: D.rivers, getPath: d => d, getColor: [78, 163, 230, 220], getWidth: 14, widthMinPixels: 2 }));
   out.push(new deck.PathLayer({
     id: 'wet', data: LINKS, getPath: l => l.path, pickable: st >= 2,
-    getColor: l => showFlood ? [78, 163, 230, 200] : [150, 155, 190, st >= 1 ? 90 : 40],
-    getWidth: 3, widthMinPixels: showFlood ? 1.6 : 0.6, updateTriggers: { getColor: st }
+    getColor: l => showCrit ? [60, 110, 170, 110] : showFlood ? [78, 163, 230, 200] : [150, 155, 190, st >= 1 ? 90 : 40],
+    getWidth: 3, widthMinPixels: showCrit ? 1 : showFlood ? 1.6 : 0.6, updateTriggers: { getColor: st, getWidth: st }
   }));
   if (st >= 1) out.push(new deck.ScatterplotLayer({
-    id: 'dest', data: D.dests, getPosition: d => [d[1], d[2]], getFillColor: d => DEST[d[0]][1], getRadius: 22, radiusMinPixels: 2.5,
-    stroked: true, getLineColor: [10, 12, 20], lineWidthMinPixels: 1, pickable: true
+    id: 'dest', data: D.dests, getPosition: d => [d[1], d[2]], getFillColor: d => DEST[d[0]][1].concat(showCrit ? 90 : 255), getRadius: 22, radiusMinPixels: 2.5,
+    stroked: !showCrit, getLineColor: [10, 12, 20], lineWidthMinPixels: 1, pickable: true, updateTriggers: { getFillColor: st }
   }));
   if (showCrit) {
-    const list = ranked().slice(0, 150), mx = linkScore(list[0]) || 1;
+    const list = ranked().slice(0, 150).reverse(), mx = linkScore(list[list.length - 1]) || 1;
     topSet = new Set(list.map(l => l.id));
-    const col = S.rank === 'traffic' ? [242, 180, 90] : [240, 96, 90];
-    out.push(new deck.PolygonLayer({
-      id: 'crit', data: list, extruded: true, pickable: true, wireframe: false,
-      getPolygon: l => l._rib || (l._rib = ribbon(l.path, 7)),
-      getElevation: l => 30 + 900 * Math.sqrt(linkScore(l) / mx),
-      getFillColor: l => sel && l.id === sel.id ? [255, 255, 255] : col,
-      material: { ambient: 0.5, diffuse: 0.6, shininess: 20 },
-      updateTriggers: { getElevation: [S.cohort, S.rank], getFillColor: [sel && sel.id, S.rank] },
-      transitions: { getElevation: 600 }
-    }));
+    const t = l => Math.sqrt(linkScore(l) / mx);
+    const pal = S.rank === 'traffic' ? [[120, 80, 40], [242, 180, 90], [255, 236, 190]] : [[110, 40, 70], [240, 96, 90], [255, 214, 170]];
+    const col = (l, a) => { const v = t(l), k = v < 0.5 ? 0 : 1, u = v < 0.5 ? v * 2 : (v - 0.5) * 2; return pal[k].map((c, i) => Math.round(c + (pal[k + 1][i] - c) * u)).concat(a); };
+    const common = { data: list, getPath: l => l.path, capRounded: true, jointRounded: true, widthUnits: 'pixels', updateTriggers: { getColor: [S.cohort, S.rank, sel && sel.id], getWidth: [S.cohort, S.rank] }, transitions: { getWidth: 500, getColor: 500 } };
+    out.push(new deck.PathLayer({ ...common, id: 'crit-glow', getColor: l => col(l, 70), getWidth: l => 10 + 26 * t(l) }));
+    out.push(new deck.PathLayer({ ...common, id: 'crit', pickable: true, getColor: l => sel && l.id === sel.id ? [255, 255, 255, 255] : col(l, 245), getWidth: l => 2.5 + 6 * t(l) }));
   }
   if (sel) out.push(new deck.PathLayer({ id: 'sel', data: [sel], getPath: l => l.path, getColor: [255, 255, 255], getWidth: 10, widthMinPixels: 4 }));
   if (showFix) {
@@ -230,7 +226,7 @@ const STEPS = [
   { t: 'Who lives here', view: { zoom: 13.4, pitch: 30, bearing: 0 } },
   { t: 'The places people walk to', view: { zoom: 13.6, pitch: 40, bearing: -10 } },
   { t: 'Then the river floods', view: { zoom: 13.7, pitch: 45, bearing: -20 } },
-  { t: 'Which flooded links matter', view: { zoom: 13.7, pitch: 55, bearing: -28 } },
+  { t: 'Which flooded links matter', view: { zoom: 13.65, pitch: 35, bearing: -15 } },
   { t: 'Cheap fixes that keep people connected', view: { zoom: 13.7, pitch: 50, bearing: -15 } }
 ];
 
@@ -250,10 +246,10 @@ function storyHtml() {
       <p>If every one of them is cut, ${fmt(m.flood_loss.elderly)} older people, ${fmt(m.flood_loss.children)} children and ${fmt(m.flood_loss.working)} working-age adults lose their access, counted as people's worth of lost trips.</p>
       <div class="legend"><span><i style="background:var(--water)"></i>flooded link</span><span><i style="background:rgba(50,110,190,.7)"></i>flooded block</span></div>`;
     case 3: return S.rank === 'need'
-      ? `<p>We cut each flooded link on its own and measure how much access each group loses. The tallest red walls are the links <b>${who}</b> rely on most${S.cohort === 'everyone' ? ' (older people count three times, children twice)' : ''}.</p>
+      ? `<p>We cut each flooded link on its own and measure how much access each group loses. The brightest, thickest red lines are the links <b>${who}</b> rely on most${S.cohort === 'everyone' ? ' (older people count three times, children twice)' : ''}.</p>
          <p>Switch the ranking to <button class="link" data-rank="traffic">how busy they are</button>: of the 50 links that matter most for vulnerable groups, <b>only ${m.top50_overlap_traffic}</b> is among the 50 busiest. A plan built on traffic would protect the wrong streets.</p>
-         <p>Tap any wall or blue link to cut it and see who loses access.</p>`
-      : `<p>These amber walls are the busiest flooded links: the ones most trips in the area pass through. They are mostly main roads.</p>
+         <p>Tap any red or blue link to cut it and see who loses access.</p>`
+      : `<p>These amber lines are the busiest flooded links: the ones most trips in the area pass through. They are mostly main roads.</p>
          <p>Switch back to <button class="link" data-rank="need">who relies on them</button>: the links older people and children depend on are short alleys and paths to a clinic or school, which traffic counts never see.</p>`;
     case 4: return `<p>Three low-regret fixes, chosen by the same model. Turn them on to see access restored per group. Blocks stay red where people are still cut off.</p>
       <div class="card">${D.fixes.map((f, i) => `<label class="fix"><input type="checkbox" data-fix="${i}" ${S.fixes >> i & 1 ? 'checked' : ''}><div><div class="n">${f.name}${f.quick_win ? '<span class="badge">best quick win</span>' : ''}</div><div class="w">${f.what}.</div><div class="m">cost ${f.cost}, restores ${fmt(f.restored.elderly)} older, ${fmt(f.restored.children)} children, ${fmt(f.restored.working)} working age</div></div></label>`).join('')}</div>
