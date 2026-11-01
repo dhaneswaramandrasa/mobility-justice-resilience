@@ -4,9 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Who Gets Cut Off</title>
-<meta name="description" content="When a flood cuts the street network, who loses access to clinics, schools, markets and stations? A city-agnostic method that ranks links by how much older people and children depend on them, shown on an example stretch of Jakarta.">
+<meta name="description" content="When a flood, fire or earthquake cuts the street network, who loses access to clinics, schools, markets and stations? A city-agnostic method that ranks links by how much older people and children depend on them, shown on an example stretch of Jakarta.">
 <meta property="og:title" content="Who gets cut off when the network breaks">
-<meta property="og:description" content="Vulnerability-weighted network criticality: the links older people and children depend on are not the busiest ones. Cut a link and see who loses access.">
+<meta property="og:description" content="Pick a flood, fire or earthquake, see who can no longer walk to a clinic or school, and test what to build before it happens.">
 <meta property="og:image" content="https://dhaneswaramandrasa.github.io/mobility-justice-resilience/og.jpg">
 <meta property="og:url" content="https://dhaneswaramandrasa.github.io/mobility-justice-resilience/">
 <meta property="og:type" content="website">
@@ -39,8 +39,20 @@ aside h2 { margin: 0 0 6px; font-size: 1.12rem; line-height: 1.25; }
 .seg button { flex: 1; font: 600 0.82rem "Archivo", sans-serif; color: var(--ink2); background: none; border: 0; padding: 7px 6px; cursor: pointer; }
 .seg button + button { border-left: 1px solid var(--line); }
 .seg button.on { background: var(--accent); color: #11132a; }
-.seg.rank button.on[data-v="traffic"] { background: var(--busy); }
-.seg.rank button.on[data-v="need"] { background: var(--hot); color: #fff; }
+.seg.rank button.on[data-rank="traffic"] { background: var(--busy); }
+.seg.rank button.on[data-rank="need"] { background: var(--hot); color: #fff; }
+.seg.hz button.on[data-v="flood"] { background: #4ea3e6; color: #0b1a2a; }
+.seg.hz button.on[data-v="fire"] { background: #ff8040; color: #2a1206; }
+.seg.hz button.on[data-v="earthquake"] { background: #c49cff; color: #1d1030; }
+.seg.day button.on { background: var(--fg); color: #11132a; }
+.rows { display: grid; gap: 6px; margin: 10px 0; }
+.rr { display: grid; grid-template-columns: 1fr auto; gap: 0 10px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; font-size: 0.8rem; color: var(--ink2); }
+.rr.on { border-color: var(--accent); background: rgba(154,157,240,0.08); }
+.rr b { font-variant-numeric: tabular-nums; color: var(--fg); font-size: 0.9rem; text-align: right; }
+.rr b i { font-style: normal; color: var(--muted); font-weight: 400; }
+.rr em { grid-column: 1 / -1; font-style: normal; font-family: var(--mono); font-size: 0.72rem; color: #f08c7a; }
+.rr em u { text-decoration: none; color: var(--ok); margin-left: 6px; }
+p.ok { color: var(--ink2); font-size: 0.85rem; border-left: 3px solid var(--ok); padding-left: 10px; }
 .steps { display: flex; gap: 6px; margin: 4px 0 10px; }
 .steps button { flex: 1; height: 6px; border: 0; border-radius: 3px; background: var(--line); cursor: pointer; padding: 0; }
 .steps button.on { background: var(--accent); }
@@ -95,21 +107,21 @@ body.embed header .back { display: none; }
 </head>
 <body>
 <div id="map"></div>
-<div id="gate"><div><button id="load">Load the map</button><p>About 2.5 MB of map data</p></div></div>
+<div id="gate"><div><button id="load">Load the map</button><p>About 3.5 MB of map data</p></div></div>
 <header>
   <h1>Who gets cut off when the network breaks</h1>
-  <p class="sub">A method to find the street links that older people and children depend on, and the cheap fixes that keep them connected in a flood.</p>
+  <p class="sub">Pick a disaster, see who can no longer walk to a clinic, school or station, find the streets that matter most for them, and test what to do before it happens.</p>
   <p class="note" id="where"></p>
 </header>
 <aside>
   <div class="ctl">
+    <label>Disaster</label>
+    <div class="seg hz" id="hz">
+      <button data-v="flood" class="on">Flood</button><button data-v="fire">Fire</button><button data-v="earthquake">Earthquake</button>
+    </div>
     <label>Whose access</label>
     <div class="seg" id="cohort">
-      <button data-v="elderly" class="on">Older people</button><button data-v="children">Children</button><button data-v="everyone">Everyone, weighted</button>
-    </div>
-    <label>Rank the flooded links by</label>
-    <div class="seg rank" id="rank">
-      <button data-v="need" class="on">Who relies on them</button><button data-v="traffic">How busy they are</button>
+      <button data-v="elderly" class="on">Older people</button><button data-v="children">Children</button><button data-v="working">Working age</button>
     </div>
   </div>
   <div class="steps" id="dots"></div>
@@ -117,97 +129,97 @@ body.embed header .back { display: none; }
   <div class="nav"><button id="prev">Back</button><button id="next" class="pri">Next</button></div>
   <div id="detail"></div>
 </aside>
-<div class="foot">Streets and places © OpenStreetMap contributors. Population cohorts and flood zone in this demo are synthetic. <a href="https://github.com/dhaneswaramandrasa/mobility-justice-resilience">Code and method</a></div>
+<div class="foot">Streets and places © OpenStreetMap contributors. Population and disasters in this demo are synthetic. <a href="https://github.com/dhaneswaramandrasa/mobility-justice-resilience">Code and method</a></div>
 <div id="tip"></div>
 <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
 <script src="https://unpkg.com/deck.gl@9.0.38/dist.min.js"></script>
 <script>
 const Q = new URLSearchParams(location.search);
 if (Q.has('embed')) document.body.classList.add('embed');
-const COH = { elderly: 'Older people', children: 'Children', working: 'Working age' };
+const COH = { elderly: 'Older people', children: 'Children', working: 'Working-age adults' };
+const COH_S = { elderly: 'older people', children: 'children', working: 'working-age adults' };
+const PLACE = { elderly: 'a clinic', children: 'a school', working: 'a station or market' };
 const DEST = { health: ['Clinics and hospitals', [240, 120, 160]], school: ['Schools', [250, 210, 110]], market: ['Markets', [120, 210, 150]], transit: ['Stations', [180, 160, 250]] };
-const S = { cohort: 'elderly', rank: 'need', step: +(Q.get('step') || 0), sel: null, fixes: 0, cellView: 'people' };
-let D, overlay, map, LINKS, topSet = new Set();
+const HZC = { flood: [78, 163, 230], fire: [255, 128, 60], earthquake: [196, 156, 255] };
+const BIT = { elderly: 1, children: 2, working: 4 };
+const S = { hz: Q.get('hz') || 'flood', cohort: Q.get('cohort') || 'elderly', rank: Q.get('rank') || 'need', step: +(Q.get('step') || 0), sel: null, fixes: +(Q.get('fixes') || 0), day: 'disaster', cellView: 'people' };
+let D, H, overlay, map, FAILED = new Set();
 
-function fmt(v) { return v >= 100 ? Math.round(v).toLocaleString() : v >= 10 ? v.toFixed(0) : v.toFixed(1); }
-function cellPop(c) { return S.cohort === 'elderly' ? c[2] : S.cohort === 'children' ? c[3] : c[2] + c[3] + c[4]; }
-function linkScore(l) {
-  if (S.rank === 'traffic') return l.flow;
-  return S.cohort === 'elderly' ? l.loss.elderly : S.cohort === 'children' ? l.loss.children : l.w;
-}
-function lossOf(e, c, w) { return S.cohort === 'elderly' ? e : S.cohort === 'children' ? c : 3 * e + 2 * c + w; }
+const fmt = v => v >= 100 ? Math.round(v).toLocaleString() : v >= 10 ? v.toFixed(0) : v.toFixed(1);
+const cellPop = c => c[{ elderly: 2, children: 3, working: 4 }[S.cohort]];
+const linkScore = l => S.rank === 'traffic' ? l.flow : l.loss[S.cohort];
+const ranked = () => H.links.filter(l => l.cells.length || S.rank === 'traffic').slice().sort((a, b) => linkScore(b) - linkScore(a));
+const rgb = c => 'rgb(' + c.join(',') + ')';
 
-// a flat ribbon around a link, so it can be extruded into a wall
-function ribbon(path, half) {
-  const lat0 = path[0][1], kx = 111320 * Math.cos(lat0 * Math.PI / 180), ky = 110540;
-  const P = path.map(p => [p[0] * kx, p[1] * ky]), L = [], R = [];
-  for (let i = 0; i < P.length; i++) {
-    const a = P[Math.max(0, i - 1)], b = P[Math.min(P.length - 1, i + 1)];
-    let dx = b[0] - a[0], dy = b[1] - a[1], n = Math.hypot(dx, dy) || 1;
-    const ox = -dy / n * half, oy = dx / n * half;
-    L.push([(P[i][0] + ox) / kx, (P[i][1] + oy) / ky]); R.push([(P[i][0] - ox) / kx, (P[i][1] - oy) / ky]);
-  }
-  return L.concat(R.reverse());
+function setHazard(hz) {
+  S.hz = hz; H = D.hazards[hz]; S.sel = null; S.fixes = 0;
+  FAILED = new Set(H.links.map(l => l.id));
+  H.links.forEach(l => { l.path = D.edges[l.id]; });
+  H._hit = new Set(H.cells_hit);
 }
 
-function ranked() { return LINKS.slice().sort((a, b) => linkScore(b) - linkScore(a)); }
+function lostSet() {
+  const m = S.step >= 4 ? S.fixes : 0;
+  return new Set(H.combos[m].lost[S.cohort]);
+}
 
 function layers() {
-  const st = S.step, sel = S.sel;
-  const cellLoss = new Map();
-  if (sel) sel.cells.forEach(([i, e, c, w]) => cellLoss.set(i, lossOf(e, c, w)));
-  const combo = D.combos[S.fixes];
-  const showFlood = st >= 2, showCrit = st >= 3, showFix = st >= 4;
-  const pops = D.cells.map(cellPop), pmax = quant(pops, 0.97);
-  const R = D.meta.cell_radius_m;
+  const st = S.step, sel = S.sel, hc = HZC[S.hz];
+  const showHz = st >= 2 && (st > 2 || S.day === 'disaster'), showCrit = st === 3, showFix = st >= 4;
+  const pops = D.cells.map(cellPop), pmax = quant(pops, 0.97), R = D.meta.cell_radius_m;
   const AR = [[127, 200, 170], [120, 150, 220], [200, 170, 110], [90, 170, 240]];
-  const archIdx = D.meta.archetypes.map(a => a.name);
+  const lost = st >= 2 ? lostSet() : null, lost0 = showFix ? new Set(H.combos[0].lost[S.cohort]) : null;
+  const cellLoss = new Map();
+  if (sel) sel.cells.forEach(([i, e, c, w]) => cellLoss.set(i, { elderly: e, children: c, working: w }[S.cohort]));
   const out = [];
   out.push(new deck.ColumnLayer({
     id: 'cells', data: D.cells, diskResolution: 6, radius: R * 0.96, angle: 90, extruded: false, pickable: true,
     getPosition: c => [c[0], c[1]],
-    getFillColor: (c, { index }) => {
-      if (sel) {
-        const v = cellLoss.get(index) || 0;
-        return v > 0 ? ramp(Math.min(1, Math.sqrt(v / 40)), true) : [40, 42, 60, 70];
-      }
-      if (showFix) {
-        const t = combo.cell, v = S.cohort === 'everyone' ? 3 * t.elderly[index] + 2 * t.children[index] + t.working[index] : t[S.cohort][index];
-        const base = cellPop(c) * (S.cohort === 'everyone' ? 1.6 : 1);
-        return v > 0.5 ? ramp(Math.min(1, v / Math.max(base, 1)), true, 150) : [40, 42, 60, 60];
-      }
-      if (S.cellView === 'arche' && st === 0) return AR[c[6]].concat(150);
-      if (showFlood && c[5]) return showCrit ? [40, 70, 120, 70] : [50, 110, 190, 110];
-      return ramp(Math.min(1, cellPop(c) / pmax), false, st === 0 ? 170 : showCrit ? 55 : 90);
+    getFillColor: (c, { index: i }) => {
+      if (sel) { const v = cellLoss.get(i) || 0; return v > 0 ? ramp(Math.min(1, Math.sqrt(v / 30)), true) : [40, 42, 60, 60]; }
+      if (st === 0) return S.cellView === 'arche' ? AR[c[5]].concat(150) : ramp(Math.min(1, cellPop(c) / pmax), false, 170);
+      if (st === 1) return ramp(Math.min(1, cellPop(c) / pmax), false, 90);
+      const inReach = c[6] & BIT[S.cohort];
+      if (!inReach) return [36, 38, 54, 90];
+      if (st === 2 && S.day === 'normal') return [90, 200, 170, 120];
+      if (showFix && lost0.has(i) && !lost.has(i)) return [111, 211, 154, 210];
+      if (lost.has(i)) return [235, 80, 80, st === 3 ? 90 : 190];
+      return [90, 200, 170, st === 3 ? 35 : 70];
     },
-    updateTriggers: { getFillColor: [S.cohort, st, sel && sel.id, S.fixes, S.cellView] }
+    updateTriggers: { getFillColor: [S.cohort, st, sel && sel.id, S.fixes, S.cellView, S.day, S.hz] }
   }));
-  out.push(new deck.PathLayer({ id: 'bg', data: D.bg, getPath: d => d, getColor: [150, 155, 190, st >= 1 ? 90 : 40], getWidth: 1, widthMinPixels: 0.6, updateTriggers: { getColor: st } }));
-  out.push(new deck.PathLayer({ id: 'river', data: D.rivers, getPath: d => d, getColor: [78, 163, 230, 220], getWidth: 14, widthMinPixels: 2 }));
-  out.push(new deck.PathLayer({
-    id: 'wet', data: LINKS, getPath: l => l.path, pickable: st >= 2,
-    getColor: l => showCrit ? [60, 110, 170, 110] : showFlood ? [78, 163, 230, 200] : [150, 155, 190, st >= 1 ? 90 : 40],
-    getWidth: 3, widthMinPixels: showCrit ? 1 : showFlood ? 1.6 : 0.6, updateTriggers: { getColor: st, getWidth: st }
+  if (showHz && H._hit.size) out.push(new deck.ColumnLayer({
+    id: 'zone', data: H.cells_hit, diskResolution: 6, radius: R * 0.96, angle: 90, extruded: false,
+    getPosition: i => [D.cells[i][0], D.cells[i][1]], getFillColor: hc.concat(st === 2 ? 60 : 30), stroked: true,
+    getLineColor: hc.concat(st === 2 ? 120 : 50), lineWidthMinPixels: 0.5, updateTriggers: { getFillColor: [st, S.hz], getLineColor: [st, S.hz] }
+  }));
+  out.push(new deck.PathLayer({ id: 'bg', data: D.edges, getPath: d => d, getColor: [150, 155, 190, st >= 1 ? 70 : 35], getWidth: 1, widthMinPixels: 0.5, updateTriggers: { getColor: st } }));
+  out.push(new deck.PathLayer({ id: 'river', data: D.rivers, getPath: d => d, getColor: [78, 163, 230, 200], getWidth: 14, widthMinPixels: 2 }));
+  if (showHz) out.push(new deck.PathLayer({
+    id: 'failed', data: H.links, getPath: l => l.path, pickable: true, capRounded: true,
+    getColor: hc.concat(st === 2 ? 230 : 110), getWidth: 3, widthMinPixels: st === 2 ? 2 : 1.2, updateTriggers: { getColor: [st, S.hz] }
   }));
   if (st >= 1) out.push(new deck.ScatterplotLayer({
-    id: 'dest', data: D.dests, getPosition: d => [d[1], d[2]], getFillColor: d => DEST[d[0]][1].concat(showCrit ? 90 : 255), getRadius: 22, radiusMinPixels: 2.5,
-    stroked: !showCrit, getLineColor: [10, 12, 20], lineWidthMinPixels: 1, pickable: true, updateTriggers: { getFillColor: st }
+    id: 'dest', data: D.dests, getPosition: d => [d[1], d[2]], getFillColor: d => DEST[d[0]][1].concat(st >= 2 ? 110 : 255), getRadius: 22, radiusMinPixels: 2.5,
+    stroked: st < 2, getLineColor: [10, 12, 20], lineWidthMinPixels: 1, pickable: true, updateTriggers: { getFillColor: st }
   }));
-  if (showCrit) {
-    const list = ranked().slice(0, 150).reverse(), mx = linkScore(list[list.length - 1]) || 1;
-    topSet = new Set(list.map(l => l.id));
+  if (showCrit || sel) {
+    const list = (showCrit ? ranked().slice(0, 150) : [sel]).reverse(), mx = linkScore(list[list.length - 1]) || 1;
     const t = l => Math.sqrt(linkScore(l) / mx);
     const pal = S.rank === 'traffic' ? [[120, 80, 40], [242, 180, 90], [255, 236, 190]] : [[110, 40, 70], [240, 96, 90], [255, 214, 170]];
     const col = (l, a) => { const v = t(l), k = v < 0.5 ? 0 : 1, u = v < 0.5 ? v * 2 : (v - 0.5) * 2; return pal[k].map((c, i) => Math.round(c + (pal[k + 1][i] - c) * u)).concat(a); };
-    const common = { data: list, getPath: l => l.path, capRounded: true, jointRounded: true, widthUnits: 'pixels', updateTriggers: { getColor: [S.cohort, S.rank, sel && sel.id], getWidth: [S.cohort, S.rank] }, transitions: { getWidth: 500, getColor: 500 } };
+    const common = { data: list, getPath: l => l.path, capRounded: true, jointRounded: true, widthUnits: 'pixels', updateTriggers: { getColor: [S.cohort, S.rank, sel && sel.id, S.hz], getWidth: [S.cohort, S.rank, S.hz] }, transitions: { getWidth: 500, getColor: 500 } };
     out.push(new deck.PathLayer({ ...common, id: 'crit-glow', getColor: l => col(l, 70), getWidth: l => 10 + 26 * t(l) }));
     out.push(new deck.PathLayer({ ...common, id: 'crit', pickable: true, getColor: l => sel && l.id === sel.id ? [255, 255, 255, 255] : col(l, 245), getWidth: l => 2.5 + 6 * t(l) }));
   }
   if (sel) out.push(new deck.PathLayer({ id: 'sel', data: [sel], getPath: l => l.path, getColor: [255, 255, 255], getWidth: 10, widthMinPixels: 4 }));
   if (showFix) {
-    const on = D.fixes.filter((f, i) => S.fixes >> i & 1);
-    out.push(new deck.PathLayer({ id: 'fixpath', data: on.flatMap(f => f.id === 'shuttle' ? [] : f.path), getPath: d => d, getColor: [111, 211, 154], getWidth: 14, widthMinPixels: 4 }));
-    out.push(new deck.ArcLayer({ id: 'shuttle', data: on.filter(f => f.id === 'shuttle'), getSourcePosition: f => f.path[0][0], getTargetPosition: f => f.path[0][1], getSourceColor: [111, 211, 154], getTargetColor: [240, 120, 160], getWidth: 4, getHeight: 0.6 }));
+    const on = H.fixes.filter((f, i) => S.fixes >> i & 1);
+    const glow = on.filter(f => f.id === 'strengthen').flatMap(f => f.links.map(id => D.edges[id]));
+    out.push(new deck.PathLayer({ id: 'fix-glow', data: glow, getPath: d => d, getColor: [111, 211, 154, 80], getWidth: 24, widthUnits: 'pixels', capRounded: true }));
+    out.push(new deck.PathLayer({ id: 'fix-str', data: glow, getPath: d => d, getColor: [190, 255, 215], getWidth: 5, widthUnits: 'pixels', capRounded: true }));
+    out.push(new deck.PathLayer({ id: 'fix-add', data: on.filter(f => f.id === 'add').map(f => f.path), getPath: d => d, getColor: [190, 255, 215], getWidth: 6, widthUnits: 'pixels', capRounded: true, getDashArray: [3, 2] }));
+    out.push(new deck.ArcLayer({ id: 'shuttle', data: on.filter(f => f.id === 'respond'), getSourcePosition: f => f.path[0], getTargetPosition: f => f.path[1], getSourceColor: [111, 211, 154], getTargetColor: [240, 120, 160], getWidth: 4, getHeight: 0.6 }));
   }
   return out;
 }
@@ -218,65 +230,69 @@ function ramp(t, hot, alpha) {
   const k = t < 0.5 ? 0 : 1, u = t < 0.5 ? t * 2 : (t - 0.5) * 2;
   return A[k].map((v, i) => Math.round(v + (A[k + 1][i] - v) * u)).concat(alpha || 200);
 }
-function rampCss(hot) { return 'linear-gradient(90deg,' + [0, 0.5, 1].map(t => 'rgb(' + ramp(t, hot).slice(0, 3) + ')').join(',') + ')'; }
+function rampCss(hot) { return 'linear-gradient(90deg,' + [0, 0.5, 1].map(t => rgb(ramp(t, hot).slice(0, 3))).join(',') + ')'; }
 
 function redraw() { overlay.setProps({ layers: layers() }); renderPanel(); }
 
 const STEPS = [
   { t: 'Who lives here', view: { zoom: 13.4, pitch: 30, bearing: 0 } },
-  { t: 'The places people walk to', view: { zoom: 13.6, pitch: 40, bearing: -10 } },
-  { t: 'Then the river floods', view: { zoom: 13.7, pitch: 45, bearing: -20 } },
-  { t: 'Which flooded links matter', view: { zoom: 13.65, pitch: 35, bearing: -15 } },
-  { t: 'Cheap fixes that keep people connected', view: { zoom: 13.7, pitch: 50, bearing: -15 } }
+  { t: 'The places they walk to', view: { zoom: 13.5, pitch: 35, bearing: -8 } },
+  { t: 'The disaster hits', view: { zoom: 13.5, pitch: 40, bearing: -14 } },
+  { t: 'Which streets matter most', view: { zoom: 13.65, pitch: 35, bearing: -15 } },
+  { t: 'Prepare before, respond during', view: { zoom: 13.6, pitch: 40, bearing: -12 } }
 ];
 
-function storyHtml() {
-  const m = D.meta, who = S.cohort === 'everyone' ? 'everyone' : COH[S.cohort].toLowerCase();
-  const pop = m.pop, tot = pop.elderly + pop.children + pop.working;
-  switch (S.step) {
-    case 0: return `<p>Each hexagon is a block about ${Math.round(m.cell_radius_m * 2)} m across. Colour shows how many <b>${who}</b> live there: ${tot.toLocaleString()} people in all, ${pop.elderly.toLocaleString()} of them 65 or older and ${pop.children.toLocaleString()} under 15.</p>
-      <p>These counts are <b>synthetic</b>: OpenStreetMap buildings spread district totals over the map, with more older residents near the riverbank. This is the plug-in point for a real age-cohort map.</p>
-      <div class="legend">Colour by <button class="link" data-cv="people">${S.cellView === 'people' ? '<b>people</b>' : 'people'}</button> <button class="link" data-cv="arche">${S.cellView === 'arche' ? '<b>archetype</b>' : 'archetype'}</button></div>
-      ${S.cellView === 'arche' ? '<div class="legend">' + m.archetypes.map((a, i) => `<span><i style="background:rgb(${[[127, 200, 170], [120, 150, 220], [200, 170, 110], [90, 170, 240]][i]})"></i>${a.name} (${a.n})</span>`).join('') + '</div><p class="note">Groups of blocks on four variables: walking access, services in reach, how often people walk to them, and flood exposure.</p>'
-      : `<div class="ramp" style="background:${rampCss()}"></div><div class="rampl"><span>fewer</span><span>more ${who}</span></div>`}`;
-    case 1: return `<p>The street network is real: ${m.n_links.toLocaleString()} streets, alleys and paths from OpenStreetMap, and the clinics, schools, markets and stations people walk to.</p>
-      <p>Each group needs different places. Older people mostly need a clinic and a market, and walk shorter distances. Children need a school. Working-age adults need a station.</p>
-      <div class="legend">${Object.values(DEST).map(d => `<span><i style="background:rgb(${d[1]});border-radius:50%"></i>${d[0]}</span>`).join('')}</div>`;
-    case 2: return `<p>A flood along the Ciliwung puts <b>${m.n_flooded.toLocaleString()} links</b> under water. The flood zone here is <b>synthetic</b>, drawn from distance to the river; a real hazard map drops in the same way.</p>
-      <p>If every one of them is cut, ${fmt(m.flood_loss.elderly)} older people, ${fmt(m.flood_loss.children)} children and ${fmt(m.flood_loss.working)} working-age adults lose their access, counted as people's worth of lost trips.</p>
-      <div class="legend"><span><i style="background:var(--water)"></i>flooded link</span><span><i style="background:rgba(50,110,190,.7)"></i>flooded block</span></div>`;
-    case 3: return S.rank === 'need'
-      ? `<p>We cut each flooded link on its own and measure how much access each group loses. The brightest, thickest red lines are the links <b>${who}</b> rely on most${S.cohort === 'everyone' ? ' (older people count three times, children twice)' : ''}.</p>
-         <p>Switch the ranking to <button class="link" data-rank="traffic">how busy they are</button>: of the 50 links that matter most for vulnerable groups, <b>only ${m.top50_overlap_traffic}</b> is among the 50 busiest. A plan built on traffic would protect the wrong streets.</p>
-         <p>Tap any red or blue link to cut it and see who loses access.</p>`
-      : `<p>These amber lines are the busiest flooded links: the ones most trips in the area pass through. They are mostly main roads.</p>
-         <p>Switch back to <button class="link" data-rank="need">who relies on them</button>: the links older people and children depend on are short alleys and paths to a clinic or school, which traffic counts never see.</p>`;
-    case 4: return `<p>Three low-regret fixes, chosen by the same model. Turn them on to see access restored per group. Blocks stay red where people are still cut off.</p>
-      <div class="card">${D.fixes.map((f, i) => `<label class="fix"><input type="checkbox" data-fix="${i}" ${S.fixes >> i & 1 ? 'checked' : ''}><div><div class="n">${f.name}${f.quick_win ? '<span class="badge">best quick win</span>' : ''}</div><div class="w">${f.what}.</div><div class="m">cost ${f.cost}, restores ${fmt(f.restored.elderly)} older, ${fmt(f.restored.children)} children, ${fmt(f.restored.working)} working age</div></div></label>`).join('')}</div>
-      ${restoredBars()}`;
-  }
+function reachRows(mask, extra) {
+  const nrm = D.meta.reach, now = H.combos[mask].reach, base = H.combos[0].reach;
+  return '<div class="rows">' + ['elderly', 'children', 'working'].map(c => {
+    const lost = nrm[c] - now[c], back = now[c] - base[c];
+    return `<div class="rr ${c === S.cohort ? 'on' : ''}"><span>${COH[c]} who can walk to ${PLACE[c]}</span><b>${nrm[c].toLocaleString()} <i>to</i> ${now[c].toLocaleString()}</b><em>${lost > 0 ? '−' + lost.toLocaleString() : 'no loss'}${extra && back > 0 ? ` <u>+${back.toLocaleString()} back</u>` : ''}</em></div>`;
+  }).join('') + '</div>';
 }
 
-function restoredBars() {
-  const t = D.combos[S.fixes].tot, f = D.meta.flood_loss;
-  return '<div class="bars">' + ['elderly', 'children', 'working'].map(c => {
-    const r = f[c] - t[c], max = Math.max(...D.fixes.map(() => 1), 1);
-    const pct = 100 * r / f[c];
-    return `<div class="r"><span>${COH[c]}</span><div class="t"><i style="width:${Math.min(100, pct * 8)}%;background:var(--ok)"></i></div><span class="v">+${fmt(r)}</span></div>`;
-  }).join('') + '</div><p class="note">People\'s worth of access restored by the fixes switched on. Bars are scaled to an eighth of the total flood loss.</p>';
+function storyHtml() {
+  const m = D.meta, who = COH_S[S.cohort], pop = m.pop, tot = pop.elderly + pop.children + pop.working;
+  switch (S.step) {
+    case 0: return `<p>Each hexagon is a block about ${Math.round(m.cell_radius_m * 2)} m across. Colour shows how many <b>${who}</b> live there: ${tot.toLocaleString()} people in all, ${pop.elderly.toLocaleString()} aged 65 or more and ${pop.children.toLocaleString()} under 15.</p>
+      <p>These counts are <b>synthetic</b>, spread from district totals over OpenStreetMap buildings. A real age-cohort map plugs in here.</p>
+      <div class="legend">Colour by <button class="link" data-cv="people">${S.cellView === 'people' ? '<b>people</b>' : 'people'}</button> <button class="link" data-cv="arche">${S.cellView === 'arche' ? '<b>archetype</b>' : 'archetype'}</button></div>
+      ${S.cellView === 'arche' ? '<div class="legend">' + m.archetypes.map((a, i) => `<span><i style="background:${rgb([[127, 200, 170], [120, 150, 220], [200, 170, 110], [90, 170, 240]][i])}"></i>${a.name} (${a.n})</span>`).join('') + '</div><p class="note">Blocks grouped on four variables: walking access, services in reach, how often people walk to them, and how many of the three disasters hit them.</p>'
+      : `<div class="ramp" style="background:${rampCss()}"></div><div class="rampl"><span>fewer</span><span>more ${who}</span></div>`}`;
+    case 1: return `<p>The streets are real: ${m.n_links.toLocaleString()} streets, alleys and footpaths from OpenStreetMap, with the clinics, schools, markets and stations people walk to.</p>
+      <p>Each group depends on a different place. Here, <b>within walking reach</b> means older people within ${m.reach_m.elderly} m of a clinic, children within ${m.reach_m.children} m of a school, and working-age adults within ${m.reach_m.working} m of a station or market, along the streets.</p>
+      <div class="legend">${Object.values(DEST).map(d => `<span><i style="background:${rgb(d[1])};border-radius:50%"></i>${d[0]}</span>`).join('')}</div>`;
+    case 2: return `<p><b>${H.name}.</b> ${H.about} In this example ${H.n_fail.toLocaleString()} streets are blocked. The ${H.name.toLowerCase()} is <b>synthetic</b>; a real hazard map drops in the same way.</p>
+      <div class="seg day" id="day"><button data-day="normal" class="${S.day === 'normal' ? 'on' : ''}">Normal day</button><button data-day="disaster" class="${S.day === 'disaster' ? 'on' : ''}">${H.name} day</button></div>
+      <p style="margin-top:10px">Red blocks are where ${who} could walk to ${PLACE[S.cohort]} on a normal day, but not once the streets are blocked. Their homes may be fine; the way out is not.</p>
+      ${reachRows(0)}
+      <div class="legend"><span><i style="background:rgb(90,200,170)"></i>still in reach</span><span><i style="background:rgb(235,80,80)"></i>cut off by the ${H.name.toLowerCase()}</span><span><i style="background:${rgb(HZC[S.hz])}"></i>blocked street</span></div>`;
+    case 3: return `<div class="seg rank" id="rank"><button data-rank="need" class="${S.rank === 'need' ? 'on' : ''}">Who relies on them</button><button data-rank="traffic" class="${S.rank === 'traffic' ? 'on' : ''}">How busy they are</button></div>
+      ${S.rank === 'need'
+      ? `<p style="margin-top:10px">We block each street on its own and count how much access ${who} lose. The brightest, thickest red lines are the streets ${who} rely on most.</p>
+         <p>Of the 50 streets that matter most for vulnerable groups, <b>only ${H.overlap_traffic}</b> ${H.overlap_traffic === 1 ? 'is' : 'are'} among the 50 busiest. A plan built on traffic counts would protect the wrong streets.</p>`
+      : `<p style="margin-top:10px">These amber lines are the busiest blocked streets, the ones most trips pass through. They are mostly main roads, and most are not the streets older people and children depend on.</p>`}
+      <p>Tap a line to block just that street and see who loses access, and what strengthening it would save.</p>`;
+    case 4: {
+      const pre = H.fixes.map((f, i) => [f, i]);
+      const row = ([f, i]) => `<label class="fix"><input type="checkbox" data-fix="${i}" ${S.fixes >> i & 1 ? 'checked' : ''}><div><div class="n">${f.name}${f.quick_win ? '<span class="badge">best quick win</span>' : ''}</div><div class="w">${f.what}.</div><div class="m">cost ${f.cost}. ${['elderly', 'children', 'working'].filter(c => f.reach_back[c] > 0).map(c => `${f.reach_back[c].toLocaleString()} ${COH_S[c]} back in reach`).join(', ') || 'shortens detours, nobody back within reach'}</div></div></label>`;
+      return `<p>Three options the model picked for this ${H.name.toLowerCase()}. Turn them on: green blocks are back within walking reach of ${PLACE[S.cohort]}, red ones are still cut off.</p>
+      <div class="card"><h3>Prepare before it happens</h3>${pre.filter(([f]) => f.when === 'before').map(row).join('')}</div>
+      <div class="card"><h3>Respond on the day</h3>${pre.filter(([f]) => f.when === 'during').map(row).join('')}</div>
+      ${reachRows(S.fixes, true)}`;
+    }
+  }
 }
 
 function detailHtml() {
   const l = S.sel;
   if (!l) return '';
-  const max = Math.max(l.loss.elderly, l.loss.children, l.loss.working, 1);
-  const W = ['elderly', 'children', 'working'];
-  return `<div class="card"><h3>This link is cut</h3>
-    <p class="note">${l.len} m ${l.hw.replace('_', ' ')}. ${l.cells.length} blocks lose access, shown in red.</p>
-    <div class="bars">${W.map(c => `<div class="r"><span>${COH[c]}</span><div class="t"><i style="width:${100 * l.loss[c] / max}%;background:${c === 'working' ? 'var(--accent)' : 'var(--hot)'}"></i></div><span class="v">${fmt(l.loss[c])}</span></div>`).join('')}</div>
-    <div class="ranks"><div><b>${l.rank.weighted}</b>rank by who relies on it</div><div><b>${l.rank.plain}</b>rank, everyone the same</div><div><b>${l.rank.traffic}</b>rank by how busy</div></div>
-    <p class="note">Out of ${LINKS.length.toLocaleString()} flooded links. Numbers are people's worth of lost access.</p>
-    <button class="link" id="uncut">Put it back</button></div>`;
+  const W = ['elderly', 'children', 'working'], any = W.some(c => l.reach[c] > 0);
+  return `<div class="card"><h3>If only this street is blocked</h3>
+    <p class="note">${l.len} m ${l.road}. Ranked ${l.rank.weighted} of ${H.links.length.toLocaleString()} blocked streets by who relies on it, ${l.rank.traffic} by how busy it is.</p>
+    ${any ? '<p>These people can no longer walk to their main place:</p><div class="rows">' + W.map(c => `<div class="rr ${c === S.cohort ? 'on' : ''}"><span>${COH[c]}, to ${PLACE[c]}</span><b>${l.reach[c].toLocaleString()}</b></div>`).join('') + '</div>'
+      : `<p>Nobody falls out of walking reach, but trips get longer: ${fmt(l.loss.elderly)} older people's, ${fmt(l.loss.children)} children's and ${fmt(l.loss.working)} working-age adults' worth of access is lost.</p>`}
+    <p class="ok"><b>Strengthen it before the disaster</b> (${S.hz === 'flood' ? 'raise it' : S.hz === 'fire' ? 'widen it into a fire lane' : 'retrofit and widen it'}) and all of them keep their access.</p>
+    <button class="link" id="uncut">Clear</button></div>`;
 }
 
 function renderPanel() {
@@ -286,29 +302,30 @@ function renderPanel() {
   document.getElementById('prev').disabled = S.step === 0;
   document.getElementById('next').disabled = S.step === STEPS.length - 1;
   document.querySelectorAll('#cohort button').forEach(b => b.classList.toggle('on', b.dataset.v === S.cohort));
-  document.querySelectorAll('#rank button').forEach(b => b.classList.toggle('on', b.dataset.v === S.rank));
+  document.querySelectorAll('#hz button').forEach(b => b.classList.toggle('on', b.dataset.v === S.hz));
 }
 
 function go(step) {
   S.step = Math.max(0, Math.min(STEPS.length - 1, step));
-  if (S.step < 3) S.sel = null;
+  if (S.step !== 3) S.sel = null;
   const v = STEPS[S.step].view;
   map.easeTo({ zoom: v.zoom + (innerWidth < 760 ? -0.8 : 0), pitch: v.pitch, bearing: v.bearing, duration: 1400 });
   redraw();
 }
 
 document.addEventListener('click', e => {
-  const t = e.target.closest('[data-v],[data-step],[data-rank],[data-cv],#uncut,#prev,#next');
+  const t = e.target.closest('[data-v],[data-step],[data-rank],[data-cv],[data-day],#uncut,#prev,#next');
   if (!t) return;
   if (t.id === 'prev') return go(S.step - 1);
   if (t.id === 'next') return go(S.step + 1);
   if (t.id === 'uncut') { S.sel = null; return redraw(); }
   if (t.dataset.step) return go(+t.dataset.step);
   if (t.dataset.cv) { S.cellView = t.dataset.cv; return redraw(); }
-  if (t.dataset.rank) { S.rank = t.dataset.rank; if (S.step < 3) return go(3); return redraw(); }
+  if (t.dataset.day) { S.day = t.dataset.day; return redraw(); }
+  if (t.dataset.rank) { S.rank = t.dataset.rank; return redraw(); }
   const grp = t.parentElement.id;
   if (grp === 'cohort') { S.cohort = t.dataset.v; redraw(); }
-  if (grp === 'rank') { S.rank = t.dataset.v; if (S.step < 3) go(3); else redraw(); }
+  if (grp === 'hz') { setHazard(t.dataset.v); if (S.step < 2) go(2); else redraw(); }
 });
 document.addEventListener('change', e => {
   if (e.target.dataset.fix != null) { S.fixes ^= 1 << +e.target.dataset.fix; redraw(); }
@@ -318,9 +335,9 @@ function tooltip(info) {
   const tt = document.getElementById('tip'), o = info.object;
   if (!o) { tt.style.display = 'none'; return; }
   let h = '';
-  if (info.layer.id === 'cells') h = `${o[2]} older, ${o[3]} children, ${o[4]} working age${o[5] ? '<br>in the flood zone' : ''}`;
-  else if (info.layer.id === 'dest') h = `${DEST[o[0]][0].replace(/s$/, '').replace('Clinics and hospital', 'Clinic or hospital')}${o[3] ? ': ' + o[3] : ''}`;
-  else if (o.loss) h = `${o.len} m ${o.hw.replace('_', ' ')}<br>${fmt(o.loss.elderly)} older, ${fmt(o.loss.children)} children lose access<br>tap to cut it`;
+  if (info.layer.id === 'cells') h = `${o[2]} older, ${o[3]} children, ${o[4]} working age`;
+  else if (info.layer.id === 'dest') h = DEST[o[0]][0] + (o[3] ? ': ' + o[3] : '');
+  else if (o.loss) h = `${o.len} m ${o.road}<br>${o.reach.elderly} older people and ${o.reach.children} children lose walking reach if it is blocked<br>tap for more`;
   if (!h) { tt.style.display = 'none'; return; }
   tt.innerHTML = h; tt.style.display = 'block'; tt.style.left = info.x + 14 + 'px'; tt.style.top = info.y + 10 + 'px';
 }
@@ -331,24 +348,22 @@ function start() {
   map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'bottom-right');
   if (innerWidth >= 760 && !Q.has('embed')) map.setPadding({ left: 0, right: 420, top: 0, bottom: 0 });
   overlay = new deck.MapboxOverlay({
-    interleaved: false, layers: [], getTooltip: null, onHover: tooltip,
+    interleaved: false, layers: [], onHover: tooltip,
     onClick: info => {
-      if (info.object && info.object.loss && S.step >= 2) { S.sel = info.object; if (S.step < 3) S.step = 3; redraw(); }
+      if (info.object && info.object.loss && S.step >= 2) { S.sel = info.object; S.step = 3; redraw(); }
     }
   });
   map.addControl(overlay);
   fetch('data/city.json').then(r => r.json()).then(d => {
-    D = d; LINKS = d.links;
-    document.getElementById('where').textContent = 'Example city: ' + d.meta.short + '. Any city runs from one config file.';
-    if (Q.get('cohort')) S.cohort = Q.get('cohort');
-    if (Q.get('rank')) S.rank = Q.get('rank');
+    D = d; setHazard(S.hz);
     if (Q.get('fixes')) S.fixes = +Q.get('fixes');
+    document.getElementById('where').textContent = 'Example city: ' + d.meta.short + '. Any city runs from one config file.';
     go(S.step);
     window.__ready = true;
   });
 }
 window.S = S; window.go = go; window.redraw = redraw;
-window.cutTop = n => { S.sel = ranked()[n || 0]; redraw(); };
+window.cutTop = n => { S.sel = ranked()[n || 0]; S.step = 3; redraw(); };
 
 if (Q.has('embed') || (innerWidth < 760 && !Q.has('autoload'))) {
   document.getElementById('gate').style.display = 'grid';

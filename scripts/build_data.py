@@ -2,8 +2,8 @@
 
 Three layers:
   1. cohort population grid  (pluggable: --cohorts my_grid.csv, else a synthetic stand-in)
-  2. network criticality      (OSM walking network, essential destinations, flood hazard)
-  3. policy screening         (raised segment, footbridge, pop-up shuttle)
+  2. network criticality      (OSM walking network, essential destinations, a hazard: flood, fire or earthquake)
+  3. policy screening         (prepare before: strengthen a street, add a link; respond during: a shuttle)
 
 Usage:
   python scripts/fetch_osm.py                      # once per city, writes data/raw/
@@ -44,6 +44,9 @@ VULN_WEIGHT = {"elderly": 3.0, "children": 2.0, "working": 1.0}
 # The plain baseline treats everyone the same: one need profile, one walk distance.
 PLAIN_NEED = {t: 0.25 for t in DEST_TYPES}
 PLAIN_DECAY = 800.0
+# "Within walking reach" for the plain-language counts: each group's main place and a comfortable walk.
+REACH = {"elderly": ["health"], "children": ["school"], "working": ["transit", "market"]}
+REACH_M = {"elderly": 500.0, "children": 800.0, "working": 1000.0}
 BIG = 1e7
 
 
@@ -120,7 +123,7 @@ def load_network(raw, P):
     coord = {}
     edges = []  # (u_osm, v_osm, polyline lonlat, highway)
     for w in ways:
-        hw = w["tags"].get("highway", "")
+        hw = w["tags"].get("highway", "") + ("|bridge" if w["tags"].get("bridge") not in (None, "no") else "")
         nodes, geom = w["nodes"], w["geometry"]
         for nid, g in zip(nodes, geom):
             coord[nid] = (g["lon"], g["lat"])
@@ -313,6 +316,10 @@ class Access:
         s["plain"] = sum(PLAIN_NEED[t] * np.exp(-dc[t] / PLAIN_DECAY) for t in DEST_TYPES)
         return s
 
+    def reach(self, d):
+        """Per cohort, which cells can walk to their main place within the comfortable distance."""
+        return {c: np.min([d[t][self.cell_node] for t in REACH[c]], axis=0) + self.cell_snap <= REACH_M[c] for c in COHORTS}
+
     def loss(self, s):
         """Access lost per cell, in people: population x share of their access that is gone."""
         out = {}
@@ -346,6 +353,85 @@ def traffic(net, node_w, n_src=400):
                 sub[p] += sub[x]
                 flow[eid[(p, x)]] += sub[x]
     return flow
+
+
+# ---------------------------------------------------------------- hazards
+# Each hazard returns which links fail, which cells are inside the hit area and
+# which junctions are unsafe. All three are synthetic stand-ins; a real hazard
+# layer (GeoJSON polygons) replaces any of them via "source": "file".
+NARROW = {"footway", "path", "steps", "pedestrian", "service", "living_street", "track", "alley", "corridor"}
+
+FIXES = {
+    "flood": {"strengthen": ("Raise the street above flood level", "high"),
+              "add": ("Build a raised footbridge", "medium"),
+              "respond": ("Run a flood-day clinic shuttle", "low")},
+    "fire": {"strengthen": ("Widen the alley into a fire lane", "medium"),
+             "add": ("Open a second way out", "medium"),
+             "respond": ("Run an evacuation shuttle to the clinic", "low")},
+    "earthquake": {"strengthen": ("Retrofit and widen the street", "high"),
+                   "add": ("Build a new connecting street", "medium"),
+                   "respond": ("Run a shuttle to the clinic", "low")},
+}
+
+
+def hazard_flood(h, ctx):
+    field = noise_field(900)
+    depth = lambda x, y: (h["band_m"] - ctx["river_d"](x, y)) / h["band_m"] + h["depth_noise"] * field(x, y)
+    return depth(ctx["mx"], ctx["my"]) > 0, depth(ctx["cx"], ctx["cy"]) > 0, depth(ctx["nx"], ctx["ny"]) > 0
+
+
+def hazard_fire(h, ctx):
+    """Fires start in the densest blocks of buildings and close every street within reach of the flames."""
+    bt = ctx["btree"]
+    dens = np.array([len(v) for v in bt.query_ball_point(np.column_stack([ctx["cx"], ctx["cy"]]), 80)])
+    order = np.argsort(-dens + RNG.uniform(0, dens.std() * 0.6, len(dens)))
+    sites = []
+    for i in order:
+        if all(math.hypot(ctx["cx"][i] - ctx["cx"][j], ctx["cy"][i] - ctx["cy"][j]) > h["spacing_m"] for j in sites):
+            sites.append(i)
+        if len(sites) == h["sites"]:
+            break
+    sx, sy = ctx["cx"][sites], ctx["cy"][sites]
+    near = lambda x, y: np.min(np.hypot(x[:, None] - sx, y[:, None] - sy), axis=1) < h["radius_m"]
+    return near(ctx["mx"], ctx["my"]), near(ctx["cx"], ctx["cy"]), near(ctx["nx"], ctx["ny"])
+
+
+def hazard_earthquake(h, ctx):
+    """Collapsed buildings block narrow lanes in dense blocks; some bridges are closed for inspection."""
+    bt = ctx["btree"]
+    dens = np.array([len(v) for v in bt.query_ball_point(np.column_stack([ctx["mx"], ctx["my"]]), 40)])
+    cut_d = np.quantile(dens, 1 - h["dense_share"])
+    hw = ctx["hw"]
+    narrow = np.array([x.split("|")[0] in NARROW for x in hw])
+    bridge = np.array(["bridge" in x for x in hw])
+    fail = (narrow & (dens >= cut_d) & (RNG.uniform(size=len(hw)) < h["debris_p"])) | (bridge & (RNG.uniform(size=len(hw)) < h["bridge_p"]))
+    bad = np.zeros(len(ctx["nx"]), bool)
+    bad[ctx["u"][fail]] = True; bad[ctx["v"][fail]] = True
+    return fail, np.zeros(len(ctx["cx"]), bool), bad
+
+
+HAZARDS = {"flood": hazard_flood, "fire": hazard_fire, "earthquake": hazard_earthquake}
+
+
+def hazard_from_file(h, ctx, P):
+    gj = json.loads(Path(h["path"]).read_text())
+    rings = []
+    for feat in gj["features"]:
+        g = feat["geometry"]
+        for poly in ([g["coordinates"]] if g["type"] == "Polygon" else g["coordinates"]):
+            rx, ry = P.xy([p[0] for p in poly[0]], [p[1] for p in poly[0]])
+            rings.append(np.column_stack([rx, ry]))
+    return (point_in_polys(ctx["mx"], ctx["my"], rings), point_in_polys(ctx["cx"], ctx["cy"], rings),
+            point_in_polys(ctx["nx"], ctx["ny"], rings))
+
+
+def plain_road(hw):
+    base, bridge = hw.split("|")[0], "bridge" in hw
+    name = ("footpath" if base in ("footway", "path", "steps", "pedestrian", "corridor") else
+            "alley" if base in ("service", "living_street", "track", "alley") else
+            "local street" if base in ("residential", "unclassified", "road") else
+            "main road" if base in ("primary", "secondary", "tertiary", "trunk", "primary_link", "secondary_link", "tertiary_link", "trunk_link") else "street")
+    return name + (" on a bridge" if bridge else "")
 
 
 # ---------------------------------------------------------------- main
@@ -387,257 +473,227 @@ def main():
         dest_nodes[t] = np.unique(nn)
         dest_out += [[t, round(d[0], 5), round(d[1], 5), d[2]] for d in dests[t]]
 
-    # Flood hazard
-    f = cfg["flood"]
-    mx = np.array([(nx[a] + nx[b]) / 2 for a, b in zip(net.u, net.v)])
-    my = np.array([(ny[a] + ny[b]) / 2 for a, b in zip(net.u, net.v)])
-    if f["source"] == "synthetic":
-        field = noise_field(900)
-
-        def depth(x, y):
-            return (f["band_m"] - river_d(x, y)) / f["band_m"] + f["depth_noise"] * field(x, y)
-        flooded = depth(mx, my) > 0
-        cell_depth = depth(cx, cy)
-        cell_flooded = cell_depth > 0
-        node_wet = depth(nx, ny) > 0
-    else:  # a real hazard layer: GeoJSON polygons of flood-prone areas
-        gj = json.loads(Path(f["path"]).read_text())
-        rings = []
-        for feat in gj["features"]:
-            g = feat["geometry"]
-            polys = [g["coordinates"]] if g["type"] == "Polygon" else g["coordinates"]
-            for poly in polys:
-                rx, ry = P.xy([p[0] for p in poly[0]], [p[1] for p in poly[0]])
-                rings.append(np.column_stack([rx, ry]))
-        flooded = point_in_polys(mx, my, rings)
-        cell_flooded = point_in_polys(cx, cy, rings)
-        node_wet = point_in_polys(nx, ny, rings)
-        cell_depth = cell_flooded.astype(float)
-    cand = np.where(flooded)[0]
-    print(f"  {len(cand)} links in the flood zone")
-
-    # Layer 2: criticality of each exposed link, one at a time
     acc = Access(net, cells, dest_nodes, cell_node, cell_snap)
     base_d = acc.base_d
-    res = {}
-    for k, e in enumerate(cand):
-        a, b, L = net.u[e], net.v[e], net.L[e]
-        hit = [t for t in DEST_TYPES if abs(abs(base_d[t][a] - base_d[t][b]) - L) < 1e-6]
-        if not hit:
-            continue
-        G = net.graph(cut=[e])
-        d = dict(base_d)
-        for t in hit:
-            d[t] = dijkstra(G, directed=False, indices=dest_nodes[t], min_only=True)
-        lo = acc.loss(acc.scores(d))
-        res[e] = lo
-        if k % 500 == 0:
-            print(f"  link {k}/{len(cand)}")
+    base_reach = acc.reach(base_d)
     node_w = np.bincount(cell_node, weights=acc.pop_all, minlength=net.n)
     flow = traffic(net, node_w)
-
-    rows = []
-    for e in cand:
-        lo = res.get(e)
-        tot = {c: float(lo[c].sum()) if lo is not None else 0.0 for c in COHORTS + ["plain"]}
-        rows.append((e, tot, weighted(tot), flow[e]))
-    w_rank = {e: i + 1 for i, (e, *_r) in enumerate(sorted(rows, key=lambda r: -r[2]))}
-    p_rank = {e: i + 1 for i, (e, *_r) in enumerate(sorted(rows, key=lambda r: -r[1]["plain"]))}
-    t_rank = {e: i + 1 for i, (e, *_r) in enumerate(sorted(rows, key=lambda r: -r[3]))}
-
-    # Flood scenario: all exposed links cut at once, then the policy options
-    print("flood scenario and fixes ...")
-    flood_d = acc.dists(net.graph(cut=cand))
-    flood_loss = acc.loss(acc.scores(flood_d))
-    flood_tot = {c: float(flood_loss[c].sum()) for c in COHORTS}
-
-    dry = ~node_wet
-    hot = flood_loss["elderly"] * 3 + flood_loss["children"] * 2 + flood_loss["working"]
-
-    def evaluate(fix):
-        cut = set(cand) - set(fix.get("raise", []))
-        G = net.graph(cut=sorted(cut), extra=fix.get("bridge", []))
-        d = acc.dists(G, extra_by_type=fix.get("shuttle"))
-        return acc.loss(acc.scores(d))
-
-    def gain(lo):
-        return weighted({c: flood_tot[c] - float(lo[c].sum()) for c in COHORTS})
-
-    G_flood = net.graph(cut=cand)
-    hot_nodes = np.argsort(-np.bincount(cell_node, weights=hot, minlength=net.n))[:60]
-
-    # Raised segment: raise the flooded links on the shortest dry-to-dry route past a hot spot
-    best_raise = None
-    dry_idx = np.where(dry)[0]
-    dtree = cKDTree(np.column_stack([nx[dry_idx], ny[dry_idx]]))
     eid = {}
     for k, (a, b) in enumerate(zip(net.u, net.v)):
         eid[(a, b)] = k; eid[(b, a)] = k
-    D0, Pr0 = dijkstra(net.graph(), directed=False, indices=hot_nodes[:25], return_predecessors=True)
-    for i, h in enumerate(hot_nodes[:25]):
-        # walk the intact shortest-path tree from the hot spot to the nearest dry clinic, school or market
-        targets = np.concatenate([dest_nodes["health"], dest_nodes["school"], dest_nodes["market"]])
-        targets = targets[dry[targets]]
-        t = targets[np.argmin(D0[i][targets])]
-        path, x = [], t
-        while x != h and x >= 0:
-            p = Pr0[i][x]
-            if p < 0:
-                break
-            path.append(eid[(p, x)]); x = p
-        wet_links = [e for e in path if flooded[e]]
-        length = float(net.L[wet_links].sum())
-        if not wet_links or length > 700:
-            continue
-        lo = evaluate({"raise": wet_links})
-        g = gain(lo)
-        if best_raise is None or g / max(length, 50) > best_raise[0] / max(best_raise[2], 50):
-            best_raise = (g, wet_links, length, lo)
 
-    # Footbridge: a new raised walkway between two dry junctions that the flood pushes far apart
-    best_bridge = None
-    dF = dijkstra(G_flood, directed=False, indices=hot_nodes[:15])
-    for i, h in enumerate(hot_nodes[:15]):
-        near = dtree.query_ball_point([nx[h], ny[h]], 350)
-        for j in near:
-            a = dry_idx[j]
-            if a == h:
+    b = np.array(json.loads((raw / "buildings.json").read_text())["elements"])
+    bx, by = P.xy(b[:, 0], b[:, 1])
+    ctx = {"river_d": river_d, "btree": cKDTree(np.column_stack([bx, by])), "nx": nx, "ny": ny, "cx": cx, "cy": cy,
+           "mx": (nx[net.u] + nx[net.v]) / 2, "my": (ny[net.u] + ny[net.v]) / 2,
+           "u": net.u, "v": net.v, "hw": [e[4] for e in netd["edges"]]}
+
+    def reach_people(r):
+        return {c: int(acc.pop[c][r[c]].sum()) for c in COHORTS}
+
+    hazards_out = {}
+    for hid, h in cfg["hazards"].items():
+        print(f"{hid} ...")
+        fail, cell_hit, node_bad = hazard_from_file(h, ctx, P) if h.get("source") == "file" else HAZARDS[hid](h, ctx)
+        cand = np.where(fail)[0]
+        print(f"  {len(cand)} links fail")
+
+        # Layer 2: criticality of each exposed link, one at a time
+        res, reach_lost = {}, {}
+        for k, e in enumerate(cand):
+            a, b_, L = net.u[e], net.v[e], net.L[e]
+            hit = [t for t in DEST_TYPES if abs(abs(base_d[t][a] - base_d[t][b_]) - L) < 1e-6]
+            if not hit:
                 continue
-            # pair the dry junction nearest the hot spot with a dry one across the flooded stretch
-            far = dtree.query_ball_point([nx[a], ny[a]], 300)
+            G = net.graph(cut=[e])
+            d = dict(base_d)
+            for t in hit:
+                d[t] = dijkstra(G, directed=False, indices=dest_nodes[t], min_only=True)
+            res[e] = acc.loss(acc.scores(d))
+            r = acc.reach(d)
+            reach_lost[e] = {c: int(acc.pop[c][base_reach[c] & ~r[c]].sum()) for c in COHORTS}
+        rows = []
+        for e in cand:
+            lo = res.get(e)
+            tot = {c: float(lo[c].sum()) if lo is not None else 0.0 for c in COHORTS + ["plain"]}
+            rows.append((e, tot, weighted(tot), flow[e]))
+        w_rank = {e: i + 1 for i, (e, *_r) in enumerate(sorted(rows, key=lambda r: -r[2]))}
+        p_rank = {e: i + 1 for i, (e, *_r) in enumerate(sorted(rows, key=lambda r: -r[1]["plain"]))}
+        t_rank = {e: i + 1 for i, (e, *_r) in enumerate(sorted(rows, key=lambda r: -r[3]))}
+
+        # The disaster day: every exposed link fails at once
+        scn_d = acc.dists(net.graph(cut=cand))
+        scn_loss = acc.loss(acc.scores(scn_d))
+        scn_tot = {c: float(scn_loss[c].sum()) for c in COHORTS}
+        safe = ~node_bad
+        hot = 3 * scn_loss["elderly"] + 2 * scn_loss["children"] + scn_loss["working"]
+        hot_nodes = np.argsort(-np.bincount(cell_node, weights=hot, minlength=net.n))[:60]
+
+        def evaluate(fix):
+            cut = sorted(set(cand.tolist()) - set(fix.get("raise", [])))
+            d = acc.dists(net.graph(cut=cut, extra=fix.get("bridge", [])), extra_by_type=fix.get("shuttle"))
+            return d, acc.loss(acc.scores(d))
+
+        def gain(lo):
+            return weighted({c: scn_tot[c] - float(lo[c].sum()) for c in COHORTS})
+
+        safe_idx = np.where(safe)[0]
+        stree = cKDTree(np.column_stack([nx[safe_idx], ny[safe_idx]]))
+
+        # Prepare: strengthen the failed links on the route from a cut-off hot spot to its nearest safe place
+        best_raise = None
+        D0, Pr0 = dijkstra(net.graph(), directed=False, indices=hot_nodes[:25], return_predecessors=True)
+        targets = np.concatenate([dest_nodes["health"], dest_nodes["school"], dest_nodes["market"]])
+        targets = targets[safe[targets]]
+        for i, hn in enumerate(hot_nodes[:25]):
+            t = targets[np.argmin(D0[i][targets])]
+            path, x = [], t
+            while x != hn and x >= 0:
+                p = Pr0[i][x]
+                if p < 0:
+                    break
+                path.append(eid[(p, x)]); x = p
+            bad_links = [e for e in path if fail[e]]
+            length = float(net.L[bad_links].sum())
+            if not bad_links or length > 700:
+                continue
+            g = gain(evaluate({"raise": bad_links})[1])
+            if best_raise is None or g / max(length, 50) > best_raise[0] / max(best_raise[2], 50):
+                best_raise = (g, bad_links, length)
+
+        # Prepare: a new link between two safe junctions that the disaster pushes far apart
+        best_bridge = None
+        G_scn = net.graph(cut=cand)
+        dF = dijkstra(G_scn, directed=False, indices=hot_nodes[:15])
+        for i, hn in enumerate(hot_nodes[:15]):
+            j = stree.query([nx[hn], ny[hn]])[1]
+            a = safe_idx[j]
+            far = stree.query_ball_point([nx[a], ny[a]], 300)
             for k in far[:: max(1, len(far) // 40)]:
-                b = dry_idx[k]
-                s = math.hypot(nx[a] - nx[b], ny[a] - ny[b])
-                if s < 80:
+                b_ = safe_idx[k]
+                s = math.hypot(nx[a] - nx[b_], ny[a] - ny[b_])
+                if s < 60 or dF[i][b_] < 4 * s + dF[i][a]:
                     continue
-                if dF[i][b] < 4 * s + dF[i][a]:
-                    continue
-                cand_b = (a, b, s)
-                lo = evaluate({"bridge": [cand_b]})
-                g = gain(lo)
+                g = gain(evaluate({"bridge": [(a, b_, s)]})[1])
                 if best_bridge is None or g > best_bridge[0]:
-                    best_bridge = (g, cand_b, s, lo)
-            break
+                    best_bridge = (g, (a, b_, s))
 
-    # Pop-up shuttle: a flood-day pickup point to the nearest dry clinic, counted as 250 m of walking
-    best_shuttle = None
-    for h in hot_nodes[:20]:
-        j = dtree.query([nx[h], ny[h]])[1]
-        a = dry_idx[j]
-        clinics = dest_nodes["health"][dry[dest_nodes["health"]]]
-        dd = np.hypot(nx[clinics] - nx[a], ny[clinics] - ny[a])
-        b = clinics[np.argmin(np.where(dd > 300, dd, BIG))]
-        lo = evaluate({"shuttle": {"health": [(a, b, 250.0)]}})
-        g = gain(lo)
-        if best_shuttle is None or g > best_shuttle[0]:
-            best_shuttle = (g, (a, b), float(np.hypot(nx[a] - nx[b], ny[a] - ny[b])), lo)
+        # Respond: a shuttle from a safe pickup point near the hot spot to the nearest safe clinic, as 250 m of walking
+        best_shuttle = None
+        clinics = dest_nodes["health"][safe[dest_nodes["health"]]]
+        for hn in hot_nodes[:20]:
+            a = safe_idx[stree.query([nx[hn], ny[hn]])[1]]
+            dd = np.hypot(nx[clinics] - nx[a], ny[clinics] - ny[a])
+            b_ = clinics[np.argmin(np.where(dd > 300, dd, BIG))]
+            g = gain(evaluate({"shuttle": {"health": [(a, b_, 250.0)]}})[1])
+            if best_shuttle is None or g > best_shuttle[0]:
+                best_shuttle = (g, (a, b_), float(np.hypot(nx[a] - nx[b_], ny[a] - ny[b_])))
 
-    fixes = []
-    if best_raise:
-        fixes.append({"id": "raise", "name": "Raise one street segment", "cost": "high",
-                      "what": f"Lift {best_raise[2]:.0f} m of street above flood level on the route from a cut-off neighbourhood to its nearest services",
-                      "spec": {"raise": [int(e) for e in best_raise[1]]},
-                      "path": [[[round(float(p[0]), 5), round(float(p[1]), 5)] for p in netd["edges"][e][3]] for e in best_raise[1]]})
-    if best_bridge:
-        a, b, s = best_bridge[1]
-        fixes.append({"id": "bridge", "name": "Build a raised footbridge", "cost": "medium",
-                      "what": f"A {s:.0f} m raised walkway between two dry streets that the flood otherwise separates",
-                      "spec": {"bridge": [(int(a), int(b), float(s))]},
-                      "path": [[[round(float(netd['lon'][a]), 5), round(float(netd['lat'][a]), 5)], [round(float(netd['lon'][b]), 5), round(float(netd['lat'][b]), 5)]]]})
-    if best_shuttle:
-        a, b = best_shuttle[1]
-        fixes.append({"id": "shuttle", "name": "Run a pop-up clinic shuttle", "cost": "low",
-                      "what": f"On flood days, a minibus from a dry pickup point to a clinic {best_shuttle[2]:.0f} m away",
-                      "spec": {"shuttle": {"health": [(int(a), int(b), 250.0)]}},
-                      "path": [[[round(float(netd['lon'][a]), 5), round(float(netd['lat'][a]), 5)], [round(float(netd['lon'][b]), 5), round(float(netd['lat'][b]), 5)]]]})
+        pt = lambda n: [round(float(netd["lon"][n]), 5), round(float(netd["lat"][n]), 5)]
+        names = FIXES.get(hid, FIXES["flood"])
+        fixes = []
+        if best_raise:
+            fixes.append({"id": "strengthen", "when": "before", "name": names["strengthen"][0], "cost": names["strengthen"][1],
+                          "what": f"{best_raise[2]:.0f} m of street on the route from a cut-off neighbourhood to its nearest services, made to stay open",
+                          "spec": {"raise": [int(e) for e in best_raise[1]]}, "links": [int(e) for e in best_raise[1]]})
+        if best_bridge:
+            a, b_, s = best_bridge[1]
+            fixes.append({"id": "add", "when": "before", "name": names["add"][0], "cost": names["add"][1],
+                          "what": f"A new {s:.0f} m link between two safe streets that the disaster otherwise separates",
+                          "spec": {"bridge": [(int(a), int(b_), float(s))]}, "path": [pt(a), pt(b_)]})
+        if best_shuttle:
+            a, b_ = best_shuttle[1]
+            fixes.append({"id": "respond", "when": "during", "name": names["respond"][0], "cost": names["respond"][1],
+                          "what": f"On the day, a minibus from a safe pickup point to a clinic {best_shuttle[2]:.0f} m away",
+                          "spec": {"shuttle": {"health": [(int(a), int(b_), 250.0)]}}, "path": [pt(a), pt(b_)]})
 
-    # every combination of fixes, so the page can toggle them freely
-    combos = {}
-    for mask in range(1 << len(fixes)):
-        spec = {"raise": [], "bridge": [], "shuttle": {}}
+        combos = {}
+        for mask in range(1 << len(fixes)):
+            spec = {"raise": [], "bridge": [], "shuttle": {}}
+            for i, fx in enumerate(fixes):
+                if mask >> i & 1:
+                    spec["raise"] += fx["spec"].get("raise", []); spec["bridge"] += fx["spec"].get("bridge", [])
+                    for t, v in fx["spec"].get("shuttle", {}).items():
+                        spec["shuttle"].setdefault(t, []).extend(v)
+            d, lo = (scn_d, scn_loss) if mask == 0 else evaluate(spec)
+            r = acc.reach(d)
+            combos[mask] = {"tot": {c: round(float(lo[c].sum()), 1) for c in COHORTS},
+                            "reach": reach_people(r),
+                            "lost": {c: np.where(base_reach[c] & ~r[c])[0].tolist() for c in COHORTS}}
         for i, fx in enumerate(fixes):
-            if mask >> i & 1:
-                spec["raise"] += fx["spec"].get("raise", []); spec["bridge"] += fx["spec"].get("bridge", [])
-                for t, v in fx["spec"].get("shuttle", {}).items():
-                    spec["shuttle"].setdefault(t, []).extend(v)
-        lo = flood_loss if mask == 0 else evaluate(spec)
-        combos[mask] = {"tot": {c: round(float(lo[c].sum()), 1) for c in COHORTS},
-                        "cell": {c: np.round(lo[c], 1).tolist() for c in COHORTS}}
-    for i, fx in enumerate(fixes):
-        t = combos[1 << i]["tot"]
-        fx["restored"] = {c: round(flood_tot[c] - t[c], 1) for c in COHORTS}
-        fx.pop("spec")
-    cost_n = {"low": 1, "medium": 2, "high": 4}
-    if fixes:
-        quick = max(fixes, key=lambda fx: weighted(fx["restored"]) / cost_n[fx["cost"]])
-        for fx in fixes:
-            fx["quick_win"] = fx is quick
+            t = combos[1 << i]
+            fx["restored"] = {c: round(scn_tot[c] - t["tot"][c], 1) for c in COHORTS}
+            fx["reach_back"] = {c: t["reach"][c] - combos[0]["reach"][c] for c in COHORTS}
+            fx.pop("spec")
+        cost_n = {"low": 1, "medium": 2, "high": 4}
+        if fixes:
+            quick = max(fixes, key=lambda fx: weighted(fx["restored"]) / cost_n[fx["cost"]])
+            for fx in fixes:
+                fx["quick_win"] = fx is quick
 
-    # Optional: mobility justice archetypes on four variables
+        detail = {e for e, r in w_rank.items() if r <= 300} | {e for e, r in t_rank.items() if r <= 150}
+        links = []
+        for e, tot, wv, fl in rows:
+            lo = res.get(e)
+            top = []
+            if e in detail and lo is not None:
+                score = 3 * lo["elderly"] + 2 * lo["children"] + lo["working"]
+                for i in np.argsort(-score)[:60]:
+                    if score[i] < 0.05:
+                        break
+                    top.append([int(i), round(float(lo["elderly"][i]), 2), round(float(lo["children"][i]), 2), round(float(lo["working"][i]), 2)])
+            links.append({"id": int(e), "len": round(float(net.L[e])), "road": plain_road(netd["edges"][e][4]),
+                          "loss": {c: round(tot[c], 1) for c in COHORTS}, "w": round(wv, 1), "flow": round(float(fl)),
+                          "reach": reach_lost.get(e, {c: 0 for c in COHORTS}),
+                          "rank": {"weighted": w_rank[e], "plain": p_rank[e], "traffic": t_rank[e]}, "cells": top})
+        top50 = {e for e, r in w_rank.items() if r <= 50}
+        hazards_out[hid] = {
+            "name": h["name"], "source": h.get("source", "synthetic"), "about": h["about"],
+            "n_fail": int(len(cand)), "cells_hit": np.where(cell_hit)[0].tolist(),
+            "overlap_traffic": len(top50 & {e for e, r in t_rank.items() if r <= 50}),
+            "overlap_plain": len(top50 & {e for e, r in p_rank.items() if r <= 50}),
+            "loss": {c: round(scn_tot[c], 1) for c in COHORTS},
+            "links": links, "fixes": fixes, "combos": combos,
+        }
+        print(f"  overlap with busiest {hazards_out[hid]['overlap_traffic']}/50, with plain {hazards_out[hid]['overlap_plain']}/50")
+        print(f"  reach normal {reach_people(base_reach)} -> disaster {combos[0]['reach']}")
+        for fx in fixes:
+            print(f"  {fx['name']}: restores {fx['restored']} reach back {fx['reach_back']}{'  <- quick win' if fx.get('quick_win') else ''}")
+
+    # Optional: mobility justice archetypes on four variables (flood exposure as the hazard)
     walk = acc.base["plain"]
     avail = np.zeros(len(cells))
     for t in DEST_TYPES:
         avail += (base_d[t][cell_node] + cell_snap < 800)
     nv = np.array([c.get("no_vehicle_share", 0.3) for c in cells])
     freq = np.clip(0.5 * nv + 0.5 * (acc.pop["elderly"] + acc.pop["children"]) / np.maximum(acc.pop_all, 1) + 0.05 * smooth_noise(cx, cy, 1200), 0, 1)
-    expo = np.clip(cell_depth, -1, 2)
+    expo = np.zeros(len(cells))
+    for hz in hazards_out.values():
+        expo[hz["cells_hit"]] += 1
     X = np.column_stack([walk, avail, freq, expo])
-    Z = (X - X.mean(0)) / X.std(0)
+    Z = (X - X.mean(0)) / np.maximum(X.std(0), 1e-9)
     arche, arche_names = kmeans_archetypes(Z, X)
 
     # ---------------------------------------------------------- export
-    lon_n, lat_n = netd["lon"], netd["lat"]
-    links = []
-    for e, tot, wv, fl in rows:
-        line = netd["edges"][e][3]
-        line = [line[0]] + line[1:-1][:: max(1, (len(line) - 2) // 6 or 1)] + [line[-1]] if len(line) > 8 else line
-        lo = res.get(e)
-        top = []
-        if lo is not None and (w_rank[e] <= 300 or t_rank[e] <= 300):
-            score = 3 * lo["elderly"] + 2 * lo["children"] + lo["working"]
-            for i in np.argsort(-score)[:60]:
-                if score[i] < 0.05:
-                    break
-                top.append([int(i), round(float(lo["elderly"][i]), 2), round(float(lo["children"][i]), 2), round(float(lo["working"][i]), 2)])
-        links.append({"id": int(e), "path": [[round(p[0], 5), round(p[1], 5)] for p in line],
-                      "len": round(float(net.L[e])), "hw": netd["edges"][e][4],
-                      "loss": {c: round(tot[c], 2) for c in COHORTS + ["plain"]},
-                      "w": round(wv, 2), "flow": round(float(fl)),
-                      "rank": {"weighted": w_rank[e], "plain": p_rank[e], "traffic": t_rank[e]},
-                      "cells": top})
-    bg = []
-    flood_set = set(cand.tolist())
-    for k, (a, b, L, line, hw) in enumerate(netd["edges"]):
-        if k in flood_set:
-            continue
-        pts = line if len(line) <= 4 else [line[0], line[len(line) // 2], line[-1]]
-        bg.append([[round(p[0], 5), round(p[1], 5)] for p in pts])
-
-    top50 = sorted(rows, key=lambda r: -r[2])[:50]
-    overlap = len({r[0] for r in top50} & {e for e, r in t_rank.items() if r <= 50})
-    overlap_p = len({r[0] for r in top50} & {e for e, r in p_rank.items() if r <= 50})
+    edges = []
+    for a, b_, L, line, hw in netd["edges"]:
+        pts = line if len(line) <= 6 else [line[0]] + line[1:-1][:: (len(line) - 2) // 4 + 1] + [line[-1]]
+        edges.append([[round(p[0], 5), round(p[1], 5)] for p in pts])
     out = {
-        "meta": {"name": cfg["name"], "short": cfg["short"], "bbox": cfg["bbox"],
-                 "cohort_source": cohort_source, "flood_source": f["source"],
-                 "need": NEED, "decay_m": DECAY_M, "vuln_weight": VULN_WEIGHT,
-                 "n_links": int(len(net.u)), "n_flooded": int(len(cand)), "cell_radius_m": cfg["cell_radius_m"],
-                 "top50_overlap_traffic": overlap, "top50_overlap_plain": overlap_p,
-                 "flood_loss": {c: round(flood_tot[c], 1) for c in COHORTS},
-                 "pop": {c: int(acc.pop[c].sum()) for c in COHORTS},
+        "meta": {"name": cfg["name"], "short": cfg["short"], "bbox": cfg["bbox"], "cohort_source": cohort_source,
+                 "need": NEED, "decay_m": DECAY_M, "vuln_weight": VULN_WEIGHT, "reach_m": REACH_M,
+                 "n_links": int(len(net.u)), "cell_radius_m": cfg["cell_radius_m"],
+                 "pop": {c: int(acc.pop[c].sum()) for c in COHORTS}, "reach": reach_people(base_reach),
                  "archetypes": arche_names},
         "cells": [[round(c["lon"], 5), round(c["lat"], 5), int(c["elderly"]), int(c["children"]), int(c["working"]),
-                   int(cell_flooded[i]), int(arche[i]), round(float(acc.base["elderly"][i]), 3)] for i, c in enumerate(cells)],
+                   int(arche[i]), int(base_reach["elderly"][i]) + 2 * int(base_reach["children"][i]) + 4 * int(base_reach["working"][i])]
+                  for i, c in enumerate(cells)],
         "rivers": [[[round(float(v), 5) for v in P.ll(*p)] for p in r[:: max(1, len(r) // 200)]] for r in rivers],
-        "dests": dest_out,
-        "links": links, "bg": bg, "fixes": fixes, "combos": combos,
+        "dests": dest_out, "edges": edges, "hazards": hazards_out,
     }
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     Path(args.out).write_text(json.dumps(out, separators=(",", ":")))
     print(f"wrote {args.out} ({Path(args.out).stat().st_size / 1e6:.1f} MB)")
-    print(f"top-50 overlap: weighted vs traffic {overlap}/50, weighted vs plain {overlap_p}/50")
-    print("flood loss (people):", out["meta"]["flood_loss"])
-    for fx in fixes:
-        print(f"  {fx['name']}: restores {fx['restored']}{'  <- quick win' if fx.get('quick_win') else ''}")
 
 
 def kmeans_archetypes(Z, X, k=4, iters=60):

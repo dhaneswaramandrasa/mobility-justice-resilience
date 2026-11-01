@@ -1,16 +1,89 @@
 {
   "name": "Example city: East and South Jakarta along the Ciliwung",
   "short": "Jakarta, Ciliwung corridor",
-  "bbox": [-6.255, 106.835, -6.200, 106.885],
-  "river_names": ["Ci Liwung", "Ciliwung", "Sungai Ciliwung", "Kali Ciliwung"],
-  "flood": {"source": "synthetic", "band_m": 260, "depth_noise": 0.35},
+  "bbox": [
+    -6.255,
+    106.835,
+    -6.2,
+    106.885
+  ],
+  "river_names": [
+    "Ci Liwung",
+    "Ciliwung",
+    "Sungai Ciliwung",
+    "Kali Ciliwung"
+  ],
   "cell_radius_m": 90,
   "districts": [
-    {"name": "Jatinegara", "lat": -6.228, "lon": 106.874, "density": 25000, "elderly": 0.075, "children": 0.230},
-    {"name": "Tebet", "lat": -6.234, "lon": 106.851, "density": 23000, "elderly": 0.085, "children": 0.215},
-    {"name": "Matraman", "lat": -6.204, "lon": 106.862, "density": 32000, "elderly": 0.080, "children": 0.220},
-    {"name": "Pancoran", "lat": -6.252, "lon": 106.843, "density": 19000, "elderly": 0.070, "children": 0.225},
-    {"name": "Kramat Jati", "lat": -6.262, "lon": 106.868, "density": 22000, "elderly": 0.065, "children": 0.240},
-    {"name": "Menteng", "lat": -6.198, "lon": 106.838, "density": 9000, "elderly": 0.110, "children": 0.180}
-  ]
+    {
+      "name": "Jatinegara",
+      "lat": -6.228,
+      "lon": 106.874,
+      "density": 25000,
+      "elderly": 0.075,
+      "children": 0.23
+    },
+    {
+      "name": "Tebet",
+      "lat": -6.234,
+      "lon": 106.851,
+      "density": 23000,
+      "elderly": 0.085,
+      "children": 0.215
+    },
+    {
+      "name": "Matraman",
+      "lat": -6.204,
+      "lon": 106.862,
+      "density": 32000,
+      "elderly": 0.08,
+      "children": 0.22
+    },
+    {
+      "name": "Pancoran",
+      "lat": -6.252,
+      "lon": 106.843,
+      "density": 19000,
+      "elderly": 0.07,
+      "children": 0.225
+    },
+    {
+      "name": "Kramat Jati",
+      "lat": -6.262,
+      "lon": 106.868,
+      "density": 22000,
+      "elderly": 0.065,
+      "children": 0.24
+    },
+    {
+      "name": "Menteng",
+      "lat": -6.198,
+      "lon": 106.838,
+      "density": 9000,
+      "elderly": 0.11,
+      "children": 0.18
+    }
+  ],
+  "hazards": {
+    "flood": {
+      "name": "Flood",
+      "about": "The Ciliwung overflows and streets near the river go under water.",
+      "band_m": 260,
+      "depth_noise": 0.35
+    },
+    "fire": {
+      "name": "Fire",
+      "about": "Fires break out in the densest blocks of houses and close every street close to the flames.",
+      "sites": 10,
+      "spacing_m": 700,
+      "radius_m": 170
+    },
+    "earthquake": {
+      "name": "Earthquake",
+      "about": "Fallen walls block narrow lanes in dense blocks, and some bridges close for inspection.",
+      "dense_share": 0.35,
+      "debris_p": 0.55,
+      "bridge_p": 0.6
+    }
+  }
 }
