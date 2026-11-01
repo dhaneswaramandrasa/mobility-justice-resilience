@@ -1,0 +1,16 @@
+{
+  "name": "Example city: East and South Jakarta along the Ciliwung",
+  "short": "Jakarta, Ciliwung corridor",
+  "bbox": [-6.255, 106.835, -6.200, 106.885],
+  "river_names": ["Ci Liwung", "Ciliwung", "Sungai Ciliwung", "Kali Ciliwung"],
+  "flood": {"source": "synthetic", "band_m": 260, "depth_noise": 0.35},
+  "cell_radius_m": 90,
+  "districts": [
+    {"name": "Jatinegara", "lat": -6.228, "lon": 106.874, "density": 25000, "elderly": 0.075, "children": 0.230},
+    {"name": "Tebet", "lat": -6.234, "lon": 106.851, "density": 23000, "elderly": 0.085, "children": 0.215},
+    {"name": "Matraman", "lat": -6.204, "lon": 106.862, "density": 32000, "elderly": 0.080, "children": 0.220},
+    {"name": "Pancoran", "lat": -6.252, "lon": 106.843, "density": 19000, "elderly": 0.070, "children": 0.225},
+    {"name": "Kramat Jati", "lat": -6.262, "lon": 106.868, "density": 22000, "elderly": 0.065, "children": 0.240},
+    {"name": "Menteng", "lat": -6.198, "lon": 106.838, "density": 9000, "elderly": 0.110, "children": 0.180}
+  ]
+}

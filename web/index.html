@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Who Gets Cut Off</title>
+<meta name="description" content="When a flood cuts the street network, who loses access to clinics, schools, markets and stations? A city-agnostic method that ranks links by how much older people and children depend on them, shown on an example stretch of Jakarta.">
+<meta property="og:title" content="Who gets cut off when the network breaks">
+<meta property="og:description" content="Vulnerability-weighted network criticality: the links older people and children depend on are not the busiest ones. Cut a link and see who loses access.">
+<meta property="og:image" content="https://dhaneswaramandrasa.github.io/mobility-justice-resilience/og.jpg">
+<meta property="og:url" content="https://dhaneswaramandrasa.github.io/mobility-justice-resilience/">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://dhaneswaramandrasa.github.io/mobility-justice-resilience/og.jpg">
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0b0d17; --panel: rgba(17, 19, 32, 0.93); --fg: #ececf0; --ink2: #c9cad2; --muted: #9a9ba6; --line: #2c2d36;
+  --accent: #9a9df0; --hot: #f0605a; --busy: #f2b45a; --water: #4ea3e6; --ok: #6fd39a;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--bg); color: var(--fg); font: 15px/1.5 "Archivo", -apple-system, "Helvetica Neue", Arial, sans-serif; overflow: hidden; }
+a { color: var(--accent); }
+#map { position: absolute; inset: 0; }
+header { position: absolute; top: 16px; left: 16px; z-index: 3; max-width: 400px; pointer-events: none; }
+header > * { pointer-events: auto; }
+h1 { margin: 0; font-size: 1.45rem; font-weight: 800; letter-spacing: -0.01em; line-height: 1.15; }
+.sub { margin: 6px 0 0; color: var(--ink2); font-size: 0.92rem; }
+.note { margin: 6px 0 0; font-family: var(--mono); font-size: 0.7rem; color: var(--muted); }
+aside { position: absolute; top: 16px; right: 16px; bottom: 16px; width: 390px; z-index: 3; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; overflow-y: auto; }
+aside h2 { margin: 0 0 6px; font-size: 1.12rem; line-height: 1.25; }
+.ctl { display: grid; gap: 8px; margin-bottom: 14px; }
+.ctl label { font-size: 0.78rem; color: var(--muted); }
+.seg { display: flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg button { flex: 1; font: 600 0.82rem "Archivo", sans-serif; color: var(--ink2); background: none; border: 0; padding: 7px 6px; cursor: pointer; }
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button.on { background: var(--accent); color: #11132a; }
+.seg.rank button.on[data-v="traffic"] { background: var(--busy); }
+.seg.rank button.on[data-v="need"] { background: var(--hot); color: #fff; }
+.steps { display: flex; gap: 6px; margin: 4px 0 10px; }
+.steps button { flex: 1; height: 6px; border: 0; border-radius: 3px; background: var(--line); cursor: pointer; padding: 0; }
+.steps button.on { background: var(--accent); }
+.story p { margin: 0 0 10px; color: var(--ink2); font-size: 0.92rem; }
+.story b { color: var(--fg); }
+.nav { display: flex; justify-content: space-between; gap: 8px; margin-top: 6px; }
+.nav button { font: 600 0.85rem "Archivo", sans-serif; background: none; color: var(--fg); border: 1px solid var(--line); border-radius: 8px; padding: 7px 14px; cursor: pointer; }
+.nav button.pri { background: var(--accent); border-color: var(--accent); color: #11132a; }
+.nav button:disabled { opacity: 0.35; cursor: default; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 8px 0; font-size: 0.78rem; color: var(--ink2); }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+.ramp { height: 8px; border-radius: 4px; margin-top: 4px; }
+.rampl { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 0.68rem; color: var(--muted); }
+.card { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin: 10px 0; background: rgba(255,255,255,0.025); }
+.card h3 { margin: 0 0 4px; font-size: 0.95rem; }
+.bars .r { display: grid; grid-template-columns: 96px 1fr 58px; gap: 8px; align-items: center; font-size: 0.8rem; padding: 2px 0; }
+.bars .t { height: 8px; border-radius: 4px; background: rgba(255,255,255,0.06); overflow: hidden; }
+.bars .t i { display: block; height: 100%; border-radius: 4px; }
+.bars .v { font-family: var(--mono); color: var(--muted); text-align: right; font-size: 0.75rem; }
+.ranks { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 8px; }
+.ranks div { font-size: 0.72rem; color: var(--muted); }
+.ranks b { display: block; font-size: 1.15rem; color: var(--fg); font-variant-numeric: tabular-nums; }
+.fix { display: grid; grid-template-columns: 22px 1fr; gap: 8px; padding: 8px 0; border-top: 1px solid var(--line); cursor: pointer; }
+.fix:first-child { border-top: 0; }
+.fix input { margin: 3px 0 0; accent-color: var(--ok); width: 16px; height: 16px; }
+.fix .n { font-weight: 600; font-size: 0.9rem; }
+.fix .w { font-size: 0.8rem; color: var(--ink2); }
+.fix .m { font-family: var(--mono); font-size: 0.72rem; color: var(--muted); }
+.badge { display: inline-block; font: 600 0.7rem "Archivo", sans-serif; background: var(--ok); color: #0c2a18; border-radius: 4px; padding: 1px 6px; margin-left: 6px; vertical-align: 1px; }
+button.link { font: inherit; color: var(--accent); background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; }
+.foot { position: absolute; left: 16px; bottom: 12px; z-index: 3; font-family: var(--mono); font-size: 0.7rem; color: var(--muted); max-width: calc(100% - 460px); }
+#tip { position: absolute; z-index: 4; pointer-events: none; background: #fff; color: #111; font-size: 0.78rem; padding: 6px 8px; border-radius: 6px; display: none; max-width: 240px; }
+#gate { position: absolute; inset: 0; z-index: 5; display: none; place-items: center; background: radial-gradient(ellipse at 50% 40%, #1a1d33, var(--bg)); }
+#gate button { font: 700 1rem "Archivo", sans-serif; background: var(--accent); color: #11132a; border: 0; border-radius: 10px; padding: 12px 20px; cursor: pointer; }
+#gate p { color: var(--muted); font-size: 0.8rem; text-align: center; margin: 10px 0 0; }
+.maplibregl-ctrl-group { background: #1a1d2e; } .maplibregl-ctrl-group button + button { border-top-color: rgba(255,255,255,.1); }
+.maplibregl-ctrl-group button .maplibregl-ctrl-icon { filter: invert(1); }
+.maplibregl-ctrl-attrib { background: rgba(14,16,28,.7) !important; color: var(--muted); } .maplibregl-ctrl-attrib a { color: var(--muted); }
+body.embed header .back { display: none; }
+@media (max-width: 760px) {
+  body { overflow: auto; }
+  #map { position: relative; height: 58vh; }
+  #gate { position: absolute; height: 58vh; bottom: auto; }
+  header { position: absolute; top: 12px; left: 16px; right: 16px; max-width: none; }
+  h1 { font-size: 1.12rem; }
+  .sub, .note { display: none; }
+  aside { position: static; width: auto; margin: 0 16px 16px; }
+  .foot { position: static; padding: 0 16px 16px; max-width: none; }
+  .maplibregl-ctrl-bottom-right { display: none; }
+}
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div id="gate"><div><button id="load">Load the map</button><p>About 2.5 MB of map data</p></div></div>
+<header>
+  <h1>Who gets cut off when the network breaks</h1>
+  <p class="sub">A method to find the street links that older people and children depend on, and the cheap fixes that keep them connected in a flood.</p>
+  <p class="note" id="where"></p>
+</header>
+<aside>
+  <div class="ctl">
+    <label>Whose access</label>
+    <div class="seg" id="cohort">
+      <button data-v="elderly" class="on">Older people</button><button data-v="children">Children</button><button data-v="everyone">Everyone, weighted</button>
+    </div>
+    <label>Rank the flooded links by</label>
+    <div class="seg rank" id="rank">
+      <button data-v="need" class="on">Who relies on them</button><button data-v="traffic">How busy they are</button>
+    </div>
+  </div>
+  <div class="steps" id="dots"></div>
+  <div class="story" id="story"></div>
+  <div class="nav"><button id="prev">Back</button><button id="next" class="pri">Next</button></div>
+  <div id="detail"></div>
+</aside>
+<div class="foot">Streets and places © OpenStreetMap contributors. Population cohorts and flood zone in this demo are synthetic. <a href="https://github.com/dhaneswaramandrasa/mobility-justice-resilience">Code and method</a></div>
+<div id="tip"></div>
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script src="https://unpkg.com/deck.gl@9.0.38/dist.min.js"></script>
+<script>
+const Q = new URLSearchParams(location.search);
+if (Q.has('embed')) document.body.classList.add('embed');
+const COH = { elderly: 'Older people', children: 'Children', working: 'Working age' };
+const DEST = { health: ['Clinics and hospitals', [240, 120, 160]], school: ['Schools', [250, 210, 110]], market: ['Markets', [120, 210, 150]], transit: ['Stations', [180, 160, 250]] };
+const S = { cohort: 'elderly', rank: 'need', step: +(Q.get('step') || 0), sel: null, fixes: 0, cellView: 'people' };
+let D, overlay, map, LINKS, topSet = new Set();
+
+function fmt(v) { return v >= 100 ? Math.round(v).toLocaleString() : v >= 10 ? v.toFixed(0) : v.toFixed(1); }
+function cellPop(c) { return S.cohort === 'elderly' ? c[2] : S.cohort === 'children' ? c[3] : c[2] + c[3] + c[4]; }
+function linkScore(l) {
+  if (S.rank === 'traffic') return l.flow;
+  return S.cohort === 'elderly' ? l.loss.elderly : S.cohort === 'children' ? l.loss.children : l.w;
+}
+function lossOf(e, c, w) { return S.cohort === 'elderly' ? e : S.cohort === 'children' ? c : 3 * e + 2 * c + w; }
+
+// a flat ribbon around a link, so it can be extruded into a wall
+function ribbon(path, half) {
+  const lat0 = path[0][1], kx = 111320 * Math.cos(lat0 * Math.PI / 180), ky = 110540;
+  const P = path.map(p => [p[0] * kx, p[1] * ky]), L = [], R = [];
+  for (let i = 0; i < P.length; i++) {
+    const a = P[Math.max(0, i - 1)], b = P[Math.min(P.length - 1, i + 1)];
+    let dx = b[0] - a[0], dy = b[1] - a[1], n = Math.hypot(dx, dy) || 1;
+    const ox = -dy / n * half, oy = dx / n * half;
+    L.push([(P[i][0] + ox) / kx, (P[i][1] + oy) / ky]); R.push([(P[i][0] - ox) / kx, (P[i][1] - oy) / ky]);
+  }
+  return L.concat(R.reverse());
+}
+
+function ranked() { return LINKS.slice().sort((a, b) => linkScore(b) - linkScore(a)); }
+
+function layers() {
+  const st = S.step, sel = S.sel;
+  const cellLoss = new Map();
+  if (sel) sel.cells.forEach(([i, e, c, w]) => cellLoss.set(i, lossOf(e, c, w)));
+  const combo = D.combos[S.fixes];
+  const showFlood = st >= 2, showCrit = st >= 3, showFix = st >= 4;
+  const pops = D.cells.map(cellPop), pmax = quant(pops, 0.97);
+  const R = D.meta.cell_radius_m;
+  const AR = [[127, 200, 170], [120, 150, 220], [200, 170, 110], [90, 170, 240]];
+  const archIdx = D.meta.archetypes.map(a => a.name);
+  const out = [];
+  out.push(new deck.ColumnLayer({
+    id: 'cells', data: D.cells, diskResolution: 6, radius: R * 0.96, angle: 90, extruded: false, pickable: true,
+    getPosition: c => [c[0], c[1]],
+    getFillColor: (c, { index }) => {
+      if (sel) {
+        const v = cellLoss.get(index) || 0;
+        return v > 0 ? ramp(Math.min(1, Math.sqrt(v / 40)), true) : [40, 42, 60, 70];
+      }
+      if (showFix) {
+        const t = combo.cell, v = S.cohort === 'everyone' ? 3 * t.elderly[index] + 2 * t.children[index] + t.working[index] : t[S.cohort][index];
+        const base = cellPop(c) * (S.cohort === 'everyone' ? 1.6 : 1);
+        return v > 0.5 ? ramp(Math.min(1, v / Math.max(base, 1)), true, 150) : [40, 42, 60, 60];
+      }
+      if (S.cellView === 'arche' && st === 0) return AR[c[6]].concat(150);
+      if (showFlood && c[5]) return [50, 110, 190, 110];
+      return ramp(Math.min(1, cellPop(c) / pmax), false, st === 0 ? 170 : 90);
+    },
+    updateTriggers: { getFillColor: [S.cohort, st, sel && sel.id, S.fixes, S.cellView] }
+  }));
+  out.push(new deck.PathLayer({ id: 'bg', data: D.bg, getPath: d => d, getColor: [150, 155, 190, st >= 1 ? 90 : 40], getWidth: 1, widthMinPixels: 0.6, updateTriggers: { getColor: st } }));
+  out.push(new deck.PathLayer({ id: 'river', data: D.rivers, getPath: d => d, getColor: [78, 163, 230, 220], getWidth: 14, widthMinPixels: 2 }));
+  out.push(new deck.PathLayer({
+    id: 'wet', data: LINKS, getPath: l => l.path, pickable: st >= 2,
+    getColor: l => showFlood ? [78, 163, 230, 200] : [150, 155, 190, st >= 1 ? 90 : 40],
+    getWidth: 3, widthMinPixels: showFlood ? 1.6 : 0.6, updateTriggers: { getColor: st }
+  }));
+  if (st >= 1) out.push(new deck.ScatterplotLayer({
+    id: 'dest', data: D.dests, getPosition: d => [d[1], d[2]], getFillColor: d => DEST[d[0]][1], getRadius: 22, radiusMinPixels: 2.5,
+    stroked: true, getLineColor: [10, 12, 20], lineWidthMinPixels: 1, pickable: true
+  }));
+  if (showCrit) {
+    const list = ranked().slice(0, 150), mx = linkScore(list[0]) || 1;
+    topSet = new Set(list.map(l => l.id));
+    const col = S.rank === 'traffic' ? [242, 180, 90] : [240, 96, 90];
+    out.push(new deck.PolygonLayer({
+      id: 'crit', data: list, extruded: true, pickable: true, wireframe: false,
+      getPolygon: l => l._rib || (l._rib = ribbon(l.path, 7)),
+      getElevation: l => 30 + 900 * Math.sqrt(linkScore(l) / mx),
+      getFillColor: l => sel && l.id === sel.id ? [255, 255, 255] : col,
+      material: { ambient: 0.5, diffuse: 0.6, shininess: 20 },
+      updateTriggers: { getElevation: [S.cohort, S.rank], getFillColor: [sel && sel.id, S.rank] },
+      transitions: { getElevation: 600 }
+    }));
+  }
+  if (sel) out.push(new deck.PathLayer({ id: 'sel', data: [sel], getPath: l => l.path, getColor: [255, 255, 255], getWidth: 10, widthMinPixels: 4 }));
+  if (showFix) {
+    const on = D.fixes.filter((f, i) => S.fixes >> i & 1);
+    out.push(new deck.PathLayer({ id: 'fixpath', data: on.flatMap(f => f.id === 'shuttle' ? [] : f.path), getPath: d => d, getColor: [111, 211, 154], getWidth: 14, widthMinPixels: 4 }));
+    out.push(new deck.ArcLayer({ id: 'shuttle', data: on.filter(f => f.id === 'shuttle'), getSourcePosition: f => f.path[0][0], getTargetPosition: f => f.path[0][1], getSourceColor: [111, 211, 154], getTargetColor: [240, 120, 160], getWidth: 4, getHeight: 0.6 }));
+  }
+  return out;
+}
+
+function quant(a, q) { const s = a.slice().sort((x, y) => x - y); return s[Math.floor(q * (s.length - 1))] || 1; }
+function ramp(t, hot, alpha) {
+  const A = hot ? [[70, 40, 60], [200, 70, 70], [255, 190, 110]] : [[34, 36, 62], [90, 92, 170], [170, 172, 245]];
+  const k = t < 0.5 ? 0 : 1, u = t < 0.5 ? t * 2 : (t - 0.5) * 2;
+  return A[k].map((v, i) => Math.round(v + (A[k + 1][i] - v) * u)).concat(alpha || 200);
+}
+function rampCss(hot) { return 'linear-gradient(90deg,' + [0, 0.5, 1].map(t => 'rgb(' + ramp(t, hot).slice(0, 3) + ')').join(',') + ')'; }
+
+function redraw() { overlay.setProps({ layers: layers() }); renderPanel(); }
+
+const STEPS = [
+  { t: 'Who lives here', view: { zoom: 13.4, pitch: 30, bearing: 0 } },
+  { t: 'The places people walk to', view: { zoom: 13.6, pitch: 40, bearing: -10 } },
+  { t: 'Then the river floods', view: { zoom: 13.7, pitch: 45, bearing: -20 } },
+  { t: 'Which flooded links matter', view: { zoom: 13.7, pitch: 55, bearing: -28 } },
+  { t: 'Cheap fixes that keep people connected', view: { zoom: 13.7, pitch: 50, bearing: -15 } }
+];
+
+function storyHtml() {
+  const m = D.meta, who = S.cohort === 'everyone' ? 'everyone' : COH[S.cohort].toLowerCase();
+  const pop = m.pop, tot = pop.elderly + pop.children + pop.working;
+  switch (S.step) {
+    case 0: return `<p>Each hexagon is a block about ${Math.round(m.cell_radius_m * 2)} m across. Colour shows how many <b>${who}</b> live there: ${tot.toLocaleString()} people in all, ${pop.elderly.toLocaleString()} of them 65 or older and ${pop.children.toLocaleString()} under 15.</p>
+      <p>These counts are <b>synthetic</b>: OpenStreetMap buildings spread district totals over the map, with more older residents near the riverbank. This is the plug-in point for a real age-cohort map.</p>
+      <div class="legend">Colour by <button class="link" data-cv="people">${S.cellView === 'people' ? '<b>people</b>' : 'people'}</button> <button class="link" data-cv="arche">${S.cellView === 'arche' ? '<b>archetype</b>' : 'archetype'}</button></div>
+      ${S.cellView === 'arche' ? '<div class="legend">' + m.archetypes.map((a, i) => `<span><i style="background:rgb(${[[127, 200, 170], [120, 150, 220], [200, 170, 110], [90, 170, 240]][i]})"></i>${a.name} (${a.n})</span>`).join('') + '</div><p class="note">Groups of blocks on four variables: walking access, services in reach, how often people walk to them, and flood exposure.</p>'
+      : `<div class="ramp" style="background:${rampCss()}"></div><div class="rampl"><span>fewer</span><span>more ${who}</span></div>`}`;
+    case 1: return `<p>The street network is real: ${m.n_links.toLocaleString()} streets, alleys and paths from OpenStreetMap, and the clinics, schools, markets and stations people walk to.</p>
+      <p>Each group needs different places. Older people mostly need a clinic and a market, and walk shorter distances. Children need a school. Working-age adults need a station.</p>
+      <div class="legend">${Object.values(DEST).map(d => `<span><i style="background:rgb(${d[1]});border-radius:50%"></i>${d[0]}</span>`).join('')}</div>`;
+    case 2: return `<p>A flood along the Ciliwung puts <b>${m.n_flooded.toLocaleString()} links</b> under water. The flood zone here is <b>synthetic</b>, drawn from distance to the river; a real hazard map drops in the same way.</p>
+      <p>If every one of them is cut, ${fmt(m.flood_loss.elderly)} older people, ${fmt(m.flood_loss.children)} children and ${fmt(m.flood_loss.working)} working-age adults lose their access, counted as people's worth of lost trips.</p>
+      <div class="legend"><span><i style="background:var(--water)"></i>flooded link</span><span><i style="background:rgba(50,110,190,.7)"></i>flooded block</span></div>`;
+    case 3: return S.rank === 'need'
+      ? `<p>We cut each flooded link on its own and measure how much access each group loses. The tallest red walls are the links <b>${who}</b> rely on most${S.cohort === 'everyone' ? ' (older people count three times, children twice)' : ''}.</p>
+         <p>Switch the ranking to <button class="link" data-rank="traffic">how busy they are</button>: of the 50 links that matter most for vulnerable groups, <b>only ${m.top50_overlap_traffic}</b> is among the 50 busiest. A plan built on traffic would protect the wrong streets.</p>
+         <p>Tap any wall or blue link to cut it and see who loses access.</p>`
+      : `<p>These amber walls are the busiest flooded links: the ones most trips in the area pass through. They are mostly main roads.</p>
+         <p>Switch back to <button class="link" data-rank="need">who relies on them</button>: the links older people and children depend on are short alleys and paths to a clinic or school, which traffic counts never see.</p>`;
+    case 4: return `<p>Three low-regret fixes, chosen by the same model. Turn them on to see access restored per group. Blocks stay red where people are still cut off.</p>
+      <div class="card">${D.fixes.map((f, i) => `<label class="fix"><input type="checkbox" data-fix="${i}" ${S.fixes >> i & 1 ? 'checked' : ''}><div><div class="n">${f.name}${f.quick_win ? '<span class="badge">best quick win</span>' : ''}</div><div class="w">${f.what}.</div><div class="m">cost ${f.cost}, restores ${fmt(f.restored.elderly)} older, ${fmt(f.restored.children)} children, ${fmt(f.restored.working)} working age</div></div></label>`).join('')}</div>
+      ${restoredBars()}`;
+  }
+}
+
+function restoredBars() {
+  const t = D.combos[S.fixes].tot, f = D.meta.flood_loss;
+  return '<div class="bars">' + ['elderly', 'children', 'working'].map(c => {
+    const r = f[c] - t[c], max = Math.max(...D.fixes.map(() => 1), 1);
+    const pct = 100 * r / f[c];
+    return `<div class="r"><span>${COH[c]}</span><div class="t"><i style="width:${Math.min(100, pct * 8)}%;background:var(--ok)"></i></div><span class="v">+${fmt(r)}</span></div>`;
+  }).join('') + '</div><p class="note">People\'s worth of access restored by the fixes switched on. Bars are scaled to an eighth of the total flood loss.</p>';
+}
+
+function detailHtml() {
+  const l = S.sel;
+  if (!l) return '';
+  const max = Math.max(l.loss.elderly, l.loss.children, l.loss.working, 1);
+  const W = ['elderly', 'children', 'working'];
+  return `<div class="card"><h3>This link is cut</h3>
+    <p class="note">${l.len} m ${l.hw.replace('_', ' ')}. ${l.cells.length} blocks lose access, shown in red.</p>
+    <div class="bars">${W.map(c => `<div class="r"><span>${COH[c]}</span><div class="t"><i style="width:${100 * l.loss[c] / max}%;background:${c === 'working' ? 'var(--accent)' : 'var(--hot)'}"></i></div><span class="v">${fmt(l.loss[c])}</span></div>`).join('')}</div>
+    <div class="ranks"><div><b>${l.rank.weighted}</b>rank by who relies on it</div><div><b>${l.rank.plain}</b>rank, everyone the same</div><div><b>${l.rank.traffic}</b>rank by how busy</div></div>
+    <p class="note">Out of ${LINKS.length.toLocaleString()} flooded links. Numbers are people's worth of lost access.</p>
+    <button class="link" id="uncut">Put it back</button></div>`;
+}
+
+function renderPanel() {
+  document.getElementById('dots').innerHTML = STEPS.map((s, i) => `<button class="${i === S.step ? 'on' : ''}" data-step="${i}" aria-label="Step ${i + 1}"></button>`).join('');
+  document.getElementById('story').innerHTML = `<h2>${S.step + 1}. ${STEPS[S.step].t}</h2>` + storyHtml();
+  document.getElementById('detail').innerHTML = detailHtml();
+  document.getElementById('prev').disabled = S.step === 0;
+  document.getElementById('next').disabled = S.step === STEPS.length - 1;
+  document.querySelectorAll('#cohort button').forEach(b => b.classList.toggle('on', b.dataset.v === S.cohort));
+  document.querySelectorAll('#rank button').forEach(b => b.classList.toggle('on', b.dataset.v === S.rank));
+}
+
+function go(step) {
+  S.step = Math.max(0, Math.min(STEPS.length - 1, step));
+  if (S.step < 3) S.sel = null;
+  const v = STEPS[S.step].view;
+  map.easeTo({ zoom: v.zoom + (innerWidth < 760 ? -0.8 : 0), pitch: v.pitch, bearing: v.bearing, duration: 1400 });
+  redraw();
+}
+
+document.addEventListener('click', e => {
+  const t = e.target.closest('[data-v],[data-step],[data-rank],[data-cv],#uncut,#prev,#next');
+  if (!t) return;
+  if (t.id === 'prev') return go(S.step - 1);
+  if (t.id === 'next') return go(S.step + 1);
+  if (t.id === 'uncut') { S.sel = null; return redraw(); }
+  if (t.dataset.step) return go(+t.dataset.step);
+  if (t.dataset.cv) { S.cellView = t.dataset.cv; return redraw(); }
+  if (t.dataset.rank) { S.rank = t.dataset.rank; if (S.step < 3) return go(3); return redraw(); }
+  const grp = t.parentElement.id;
+  if (grp === 'cohort') { S.cohort = t.dataset.v; redraw(); }
+  if (grp === 'rank') { S.rank = t.dataset.v; if (S.step < 3) go(3); else redraw(); }
+});
+document.addEventListener('change', e => {
+  if (e.target.dataset.fix != null) { S.fixes ^= 1 << +e.target.dataset.fix; redraw(); }
+});
+
+function tooltip(info) {
+  const tt = document.getElementById('tip'), o = info.object;
+  if (!o) { tt.style.display = 'none'; return; }
+  let h = '';
+  if (info.layer.id === 'cells') h = `${o[2]} older, ${o[3]} children, ${o[4]} working age${o[5] ? '<br>in the flood zone' : ''}`;
+  else if (info.layer.id === 'dest') h = `${DEST[o[0]][0].replace(/s$/, '').replace('Clinics and hospital', 'Clinic or hospital')}${o[3] ? ': ' + o[3] : ''}`;
+  else if (o.loss) h = `${o.len} m ${o.hw.replace('_', ' ')}<br>${fmt(o.loss.elderly)} older, ${fmt(o.loss.children)} children lose access<br>tap to cut it`;
+  if (!h) { tt.style.display = 'none'; return; }
+  tt.innerHTML = h; tt.style.display = 'block'; tt.style.left = info.x + 14 + 'px'; tt.style.top = info.y + 10 + 'px';
+}
+
+function start() {
+  document.getElementById('gate').style.display = 'none';
+  map = new maplibregl.Map({ container: 'map', style: 'https://tiles.openfreemap.org/styles/dark', center: [106.86, -6.2275], zoom: 13.2, pitch: 30, antialias: true, attributionControl: { compact: true } });
+  map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'bottom-right');
+  if (innerWidth >= 760 && !Q.has('embed')) map.setPadding({ left: 0, right: 420, top: 0, bottom: 0 });
+  overlay = new deck.MapboxOverlay({
+    interleaved: false, layers: [], getTooltip: null, onHover: tooltip,
+    onClick: info => {
+      if (info.object && info.object.loss && S.step >= 2) { S.sel = info.object; if (S.step < 3) S.step = 3; redraw(); }
+    }
+  });
+  map.addControl(overlay);
+  fetch('data/city.json').then(r => r.json()).then(d => {
+    D = d; LINKS = d.links;
+    document.getElementById('where').textContent = 'Example city: ' + d.meta.short + '. Any city runs from one config file.';
+    if (Q.get('cohort')) S.cohort = Q.get('cohort');
+    if (Q.get('rank')) S.rank = Q.get('rank');
+    if (Q.get('fixes')) S.fixes = +Q.get('fixes');
+    go(S.step);
+    window.__ready = true;
+  });
+}
+window.S = S; window.go = go; window.redraw = redraw;
+window.cutTop = n => { S.sel = ranked()[n || 0]; redraw(); };
+
+if (Q.has('embed') || (innerWidth < 760 && !Q.has('autoload'))) {
+  document.getElementById('gate').style.display = 'grid';
+  document.getElementById('load').onclick = start;
+} else start();
+</script>
+</body>
+</html>
